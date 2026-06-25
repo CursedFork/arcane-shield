@@ -20,6 +20,7 @@ from pages.notes import NotesPage
 from pages.shops import ShopsPage
 from pages.initiative import InitiativePage
 from pages.bulk_import import BulkImportPage
+from pages.dm_shield import DmShieldPage
 
 # ── Colour palette ─────────────────────────────────────────────────────────────
 BG       = "#0f0f13"
@@ -39,6 +40,7 @@ NAV_ITEMS = [
     ("shops",      "⚖  Shops & Loot"),
     ("initiative", "⚔  Initiative"),
     ("import",     "⬆  Bulk Import"),
+    ("dm_shield",  "🛡  DM Shield"),
 ]
 
 
@@ -123,6 +125,7 @@ class App(ctk.CTk):
             "shops":      ShopsPage(self._content, self.db),
             "initiative": InitiativePage(self._content, self.db),
             "import":     BulkImportPage(self._content, self.db),
+            "dm_shield":  DmShieldPage(self._content, self.db),
         }
 
         for page in self._pages.values():

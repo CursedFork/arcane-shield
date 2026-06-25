@@ -97,6 +97,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
             state_json TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS dm_shield_tabs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS dm_shield_panels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tab_id INTEGER NOT NULL REFERENCES dm_shield_tabs(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            width INTEGER NOT NULL DEFAULT 1
+        );
     """)
     conn.commit()
 
@@ -391,6 +404,77 @@ class Database:
 
     def delete_saved_encounter(self, id: int) -> None:
         self.conn.execute("DELETE FROM saved_encounters WHERE id=?", (id,)); self.conn.commit()
+
+    # ── DM Shield Tabs ─────────────────────────────────────────────────────────
+
+    def list_dm_tabs(self) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM dm_shield_tabs ORDER BY sort_order, id"
+        ).fetchall())
+
+    def create_dm_tab(self, name: str) -> int:
+        max_order = self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order),0) FROM dm_shield_tabs"
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO dm_shield_tabs (name, sort_order) VALUES (?,?)",
+            (name, max_order + 1)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def rename_dm_tab(self, id: int, name: str) -> None:
+        self.conn.execute("UPDATE dm_shield_tabs SET name=? WHERE id=?", (name, id))
+        self.conn.commit()
+
+    def delete_dm_tab(self, id: int) -> None:
+        self.conn.execute("DELETE FROM dm_shield_tabs WHERE id=?", (id,))
+        self.conn.commit()
+
+    def reorder_dm_tabs(self, ordered_ids: list[int]) -> None:
+        for i, tab_id in enumerate(ordered_ids):
+            self.conn.execute(
+                "UPDATE dm_shield_tabs SET sort_order=? WHERE id=?", (i, tab_id)
+            )
+        self.conn.commit()
+
+    # ── DM Shield Panels ───────────────────────────────────────────────────────
+
+    def list_dm_panels(self, tab_id: int) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM dm_shield_panels WHERE tab_id=? ORDER BY sort_order, id",
+            (tab_id,)
+        ).fetchall())
+
+    def create_dm_panel(self, tab_id: int, title: str, content: str = "", width: int = 1) -> int:
+        max_order = self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order),0) FROM dm_shield_panels WHERE tab_id=?",
+            (tab_id,)
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO dm_shield_panels (tab_id,title,content,sort_order,width) VALUES (?,?,?,?,?)",
+            (tab_id, title, content, max_order + 1, width)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_dm_panel(self, id: int, title: str, content: str, width: int) -> None:
+        self.conn.execute(
+            "UPDATE dm_shield_panels SET title=?, content=?, width=? WHERE id=?",
+            (title, content, width, id)
+        )
+        self.conn.commit()
+
+    def delete_dm_panel(self, id: int) -> None:
+        self.conn.execute("DELETE FROM dm_shield_panels WHERE id=?", (id,))
+        self.conn.commit()
+
+    def reorder_dm_panels(self, ordered_ids: list[int]) -> None:
+        for i, panel_id in enumerate(ordered_ids):
+            self.conn.execute(
+                "UPDATE dm_shield_panels SET sort_order=? WHERE id=?", (i, panel_id)
+            )
+        self.conn.commit()
 
     # ── CSV Export ─────────────────────────────────────────────────────────────
 
