@@ -7,6 +7,7 @@ import Campaigns from "./pages/Campaigns";
 import Notes from "./pages/Notes";
 import ShopsLoot from "./pages/ShopsLoot";
 import Initiative from "./pages/Initiative";
+import BulkImport from "./pages/BulkImport";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/notes" element={<Notes />} />
           <Route path="/shops" element={<ShopsLoot />} />
           <Route path="/initiative" element={<Initiative />} />
+          <Route path="/import" element={<BulkImport />} />
         </Routes>
       </main>
     </div>

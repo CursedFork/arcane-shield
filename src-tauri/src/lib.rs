@@ -65,7 +65,7 @@ pub fn run() {
             // Import
             import_json,
             // CSV
-            csv_template, export_csv, import_csv,
+            csv_template, export_csv, import_csv, import_paths,
             // Dice
             roll,
         ])

@@ -8,6 +8,7 @@ const links = [
   { to: "/notes",      label: "Notes",        icon: "✎" },
   { to: "/shops",      label: "Shops & Loot", icon: "⚖" },
   { to: "/initiative", label: "Initiative",   icon: "⚔" },
+  { to: "/import",    label: "Bulk Import",  icon: "⬆" },
 ];
 
 export default function Sidebar() {
