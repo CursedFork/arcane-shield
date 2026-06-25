@@ -109,14 +109,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
             content TEXT NOT NULL DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,
             width INTEGER NOT NULL DEFAULT 1,
-            panel_type TEXT NOT NULL DEFAULT 'text'
+            panel_type TEXT NOT NULL DEFAULT 'text',
+            panel_height INTEGER NOT NULL DEFAULT 260
         );
     """)
-    # Backfill panel_type column for DBs that predate it
-    try:
-        conn.execute("ALTER TABLE dm_shield_panels ADD COLUMN panel_type TEXT NOT NULL DEFAULT 'text'")
-    except Exception:
-        pass
+    # Backfill columns for DBs that predate them
+    for col, defn in [
+        ("panel_type",   "TEXT NOT NULL DEFAULT 'text'"),
+        ("panel_height", "INTEGER NOT NULL DEFAULT 260"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE dm_shield_panels ADD COLUMN {col} {defn}")
+        except Exception:
+            pass
     conn.commit()
 
 
@@ -453,23 +458,32 @@ class Database:
         ).fetchall())
 
     def create_dm_panel(self, tab_id: int, title: str, content: str = "",
-                        width: int = 1, panel_type: str = "text") -> int:
+                        width: int = 1, panel_type: str = "text",
+                        panel_height: int = 260) -> int:
         max_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order),0) FROM dm_shield_panels WHERE tab_id=?",
             (tab_id,)
         ).fetchone()[0]
         cur = self.conn.execute(
-            "INSERT INTO dm_shield_panels (tab_id,title,content,sort_order,width,panel_type) VALUES (?,?,?,?,?,?)",
-            (tab_id, title, content, max_order + 1, width, panel_type)
+            "INSERT INTO dm_shield_panels "
+            "(tab_id,title,content,sort_order,width,panel_type,panel_height) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (tab_id, title, content, max_order + 1, width, panel_type, panel_height)
         )
         self.conn.commit()
         return cur.lastrowid
 
     def update_dm_panel(self, id: int, title: str, content: str, width: int,
-                        panel_type: str = "text") -> None:
+                        panel_type: str = "text", panel_height: int = 260) -> None:
         self.conn.execute(
-            "UPDATE dm_shield_panels SET title=?, content=?, width=?, panel_type=? WHERE id=?",
-            (title, content, width, panel_type, id)
+            "UPDATE dm_shield_panels SET title=?, content=?, width=?, panel_type=?, panel_height=? WHERE id=?",
+            (title, content, width, panel_type, panel_height, id)
+        )
+        self.conn.commit()
+
+    def update_dm_panel_height(self, id: int, height: int) -> None:
+        self.conn.execute(
+            "UPDATE dm_shield_panels SET panel_height=? WHERE id=?", (height, id)
         )
         self.conn.commit()
 

@@ -48,7 +48,7 @@ class DmShieldPage(ctk.CTkFrame):
         self._active_tab: dict | None = None
         self._panels: list[dict] = []
 
-        # Drag state
+        # Move-drag state
         self._drag_id: int | None = None
         self._drag_source_idx: int = 0
         self._drag_ghost: tk.Toplevel | None = None
@@ -56,6 +56,10 @@ class DmShieldPage(ctk.CTkFrame):
         self._drag_offset_x = 0
         self._drag_offset_y = 0
         self._panel_widgets: list[ctk.CTkFrame] = []
+
+        # Resize-drag state
+        self._resize_start_y: int = 0
+        self._resize_start_h: int = 0
 
         self._build()
 
@@ -201,18 +205,23 @@ class DmShieldPage(ctk.CTkFrame):
             if col >= 3:
                 col = 0; row += 1
 
-    # ── Panel shell (header + drag) ────────────────────────────────────────────
+    # ── Panel shell (header + body + resize grip) ─────────────────────────────
 
     def _make_panel_widget(self, panel: dict, idx: int) -> ctk.CTkFrame:
-        ptype = panel.get("panel_type", "text")
+        ptype  = panel.get("panel_type", "text")
+        ph     = max(120, panel.get("panel_height", 260))
+
         outer = ctk.CTkFrame(self._canvas_frame, fg_color=SURFACE,
-                              corner_radius=8, border_color=BORDER, border_width=1)
-        outer._panel_id = panel["id"]
+                              corner_radius=8, border_color=BORDER, border_width=1,
+                              height=ph)
+        outer.pack_propagate(False)
+        outer.grid_propagate(False)
+        outer._panel_id  = panel["id"]
         outer._panel_idx = idx
 
-        # Header
+        # ── Header ────────────────────────────────────────────────────────────
         header = ctk.CTkFrame(outer, fg_color=SURFACE2, corner_radius=0, height=34)
-        header.pack(fill="x")
+        header.pack(fill="x", side="top")
         header.pack_propagate(False)
 
         grip = ctk.CTkLabel(header, text="⠿", text_color=MUTED,
@@ -241,9 +250,9 @@ class DmShieldPage(ctk.CTkFrame):
                       command=lambda p=panel: self._delete_panel(p)
                       ).pack(side="right")
 
-        # Body — dispatch to panel type renderer
+        # ── Body ──────────────────────────────────────────────────────────────
         body = ctk.CTkFrame(outer, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=0, pady=0)
+        body.pack(fill="both", expand=True, side="top")
 
         renderer = {
             "text":        self._body_text,
@@ -259,7 +268,22 @@ class DmShieldPage(ctk.CTkFrame):
 
         renderer(body, panel)
 
-        # Drag bindings on grip + header bg
+        # ── Resize grip (bottom strip) ────────────────────────────────────────
+        resize_grip = tk.Frame(outer, bg=BORDER, height=5, cursor="size_ns")
+        resize_grip.pack(fill="x", side="bottom")
+
+        resize_grip.bind("<ButtonPress-1>",
+                         lambda e, o=outer, p=panel: self._resize_start(e, o, p))
+        resize_grip.bind("<B1-Motion>",
+                         lambda e, o=outer, p=panel: self._resize_motion(e, o, p))
+        resize_grip.bind("<ButtonRelease-1>",
+                         lambda e, o=outer, p=panel: self._resize_end(e, o, p))
+        resize_grip.bind("<Enter>",
+                         lambda e, f=resize_grip: f.configure(bg=ACCENT))
+        resize_grip.bind("<Leave>",
+                         lambda e, f=resize_grip: f.configure(bg=BORDER))
+
+        # ── Move-drag bindings on header grip ─────────────────────────────────
         for w in (grip, header):
             w.bind("<ButtonPress-1>",  lambda e, p=panel, o=outer: self._drag_start(e, p, o))
             w.bind("<B1-Motion>",       self._drag_motion)
@@ -319,7 +343,7 @@ class DmShieldPage(ctk.CTkFrame):
 
         # Recent notes
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=120, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         scroll.columnconfigure(0, weight=1)
         notes_list_ref[0] = scroll
@@ -359,7 +383,7 @@ class DmShieldPage(ctk.CTkFrame):
         round_lbl.pack(side="left")
 
         list_frame = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                             height=130, scrollbar_button_color=ACCENT)
+                                             height=140, scrollbar_button_color=ACCENT)
         list_frame.pack(fill="x", padx=6, pady=(0, 2))
         list_frame.columnconfigure(0, weight=1)
 
@@ -481,7 +505,7 @@ class DmShieldPage(ctk.CTkFrame):
                      ).pack(fill="x")
 
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=180, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         scroll.columnconfigure(0, weight=1)
 
@@ -530,7 +554,7 @@ class DmShieldPage(ctk.CTkFrame):
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=26
                      ).pack(fill="x", padx=6, pady=(4, 2))
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=180, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         scroll.columnconfigure(0, weight=1)
 
@@ -579,7 +603,7 @@ class DmShieldPage(ctk.CTkFrame):
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=26
                      ).pack(fill="x", padx=6, pady=(4, 2))
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=180, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         scroll.columnconfigure(0, weight=1)
 
@@ -625,7 +649,7 @@ class DmShieldPage(ctk.CTkFrame):
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=26
                      ).pack(fill="x", padx=6, pady=(4, 2))
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=180, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         scroll.columnconfigure(0, weight=1)
 
@@ -661,7 +685,7 @@ class DmShieldPage(ctk.CTkFrame):
 
     def _body_shops(self, parent, panel: dict):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=200, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(4, 6))
         scroll.columnconfigure(0, weight=1)
 
@@ -690,7 +714,7 @@ class DmShieldPage(ctk.CTkFrame):
 
     def _body_party_items(self, parent, panel: dict):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
-                                         height=200, scrollbar_button_color=ACCENT)
+                                         scrollbar_button_color=ACCENT)
         scroll.pack(fill="both", expand=True, padx=6, pady=(4, 6))
         scroll.columnconfigure(0, weight=1)
 
@@ -842,6 +866,28 @@ class DmShieldPage(ctk.CTkFrame):
         if messagebox.askyesno("Delete Panel", f"Delete '{panel['title']}'?"):
             self.db.delete_dm_panel(panel["id"])
             self._load_panels()
+
+    # ── Resize drag ────────────────────────────────────────────────────────────
+
+    def _resize_start(self, event, outer: ctk.CTkFrame, panel: dict):
+        self._resize_start_y = event.y_root
+        self._resize_start_h = outer.winfo_height()
+
+    def _resize_motion(self, event, outer: ctk.CTkFrame, panel: dict):
+        delta = event.y_root - self._resize_start_y
+        new_h = max(120, self._resize_start_h + delta)
+        outer.configure(height=new_h)
+
+    def _resize_end(self, event, outer: ctk.CTkFrame, panel: dict):
+        delta = event.y_root - self._resize_start_y
+        new_h = max(120, self._resize_start_h + delta)
+        outer.configure(height=new_h)
+        self.db.update_dm_panel_height(panel["id"], new_h)
+        # Update cached panel dict so a re-render preserves the height
+        for p in self._panels:
+            if p["id"] == panel["id"]:
+                p["panel_height"] = new_h
+                break
 
     # ── Drag and drop ──────────────────────────────────────────────────────────
 
