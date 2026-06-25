@@ -195,8 +195,10 @@ class DmShieldPage(ctk.CTkFrame):
             if col + span > 3:
                 col = 0; row += 1
             widget = self._make_panel_widget(panel, idx)
+            # "new" = fills width, pins to top — panels in the same row are
+            # independently sized and do NOT stretch each other vertically.
             widget.grid(row=row, column=col, columnspan=span,
-                        sticky="nsew", padx=4, pady=4)
+                        sticky="new", padx=4, pady=4)
             self._panel_widgets.append(widget)
             col += span
             if col >= 3:
@@ -204,17 +206,22 @@ class DmShieldPage(ctk.CTkFrame):
 
     # ── Panel shell (header + body + resize grip) ─────────────────────────────
 
-    def _make_panel_widget(self, panel: dict, idx: int) -> ctk.CTkFrame:
-        ptype  = panel.get("panel_type", "text")
-        ph     = max(120, panel.get("panel_height", 260))
+    def _make_panel_widget(self, panel: dict, idx: int) -> tk.Frame:
+        ptype = panel.get("panel_type", "text")
+        ph    = max(120, panel.get("panel_height", 260))
 
-        outer = ctk.CTkFrame(self._canvas_frame, fg_color=SURFACE,
-                              corner_radius=8, border_color=BORDER, border_width=1,
-                              height=ph)
-        outer.pack_propagate(False)
-        outer.grid_propagate(False)
-        outer._panel_id  = panel["id"]
-        outer._panel_idx = idx
+        # Plain tk.Frame is the gridded container — configure(height=) is
+        # guaranteed to work on tk.Frame with pack_propagate(False).
+        # ctk.CTkFrame does NOT reliably update its drawn height after creation.
+        container = tk.Frame(self._canvas_frame, bg=BG, height=ph)
+        container.pack_propagate(False)
+        container._panel_id  = panel["id"]
+        container._panel_idx = idx
+
+        # CTkFrame fills the container for visuals only
+        outer = ctk.CTkFrame(container, fg_color=SURFACE,
+                              corner_radius=8, border_color=BORDER, border_width=1)
+        outer.pack(fill="both", expand=True, padx=1, pady=1)
 
         # ── Header ────────────────────────────────────────────────────────────
         header = ctk.CTkFrame(outer, fg_color=SURFACE2, corner_radius=0, height=34)
@@ -265,28 +272,27 @@ class DmShieldPage(ctk.CTkFrame):
 
         renderer(body, panel)
 
-        # ── Resize grip (bottom strip) ────────────────────────────────────────
-        resize_grip = tk.Frame(outer, bg=BORDER, height=5, cursor="size_ns")
+        # ── Resize grip (bottom strip, inside outer for visuals) ──────────────
+        resize_grip = tk.Frame(outer, bg=BORDER, height=6, cursor="size_ns")
         resize_grip.pack(fill="x", side="bottom")
 
+        resize_grip.bind("<Enter>", lambda e, f=resize_grip: f.configure(bg=ACCENT))
+        resize_grip.bind("<Leave>", lambda e, f=resize_grip: f.configure(bg=BORDER))
+        # Bind to container (the tk.Frame whose height we control)
         resize_grip.bind("<ButtonPress-1>",
-                         lambda e, o=outer, p=panel: self._resize_start(e, o, p))
+                         lambda e, c=container, p=panel: self._resize_start(e, c, p))
         resize_grip.bind("<B1-Motion>",
-                         lambda e, o=outer, p=panel: self._resize_motion(e, o, p))
+                         lambda e, c=container, p=panel: self._resize_motion(e, c, p))
         resize_grip.bind("<ButtonRelease-1>",
-                         lambda e, o=outer, p=panel: self._resize_end(e, o, p))
-        resize_grip.bind("<Enter>",
-                         lambda e, f=resize_grip: f.configure(bg=ACCENT))
-        resize_grip.bind("<Leave>",
-                         lambda e, f=resize_grip: f.configure(bg=BORDER))
+                         lambda e, c=container, p=panel: self._resize_end(e, c, p))
 
         # ── Move-drag bindings on header grip ─────────────────────────────────
         for w in (grip, header):
-            w.bind("<ButtonPress-1>",  lambda e, p=panel, o=outer: self._drag_start(e, p, o))
+            w.bind("<ButtonPress-1>",  lambda e, p=panel, c=container: self._drag_start(e, p, c))
             w.bind("<B1-Motion>",       self._drag_motion)
             w.bind("<ButtonRelease-1>", self._drag_end)
 
-        return outer
+        return container
 
     # ── Panel body renderers ───────────────────────────────────────────────────
 
@@ -865,27 +871,25 @@ class DmShieldPage(ctk.CTkFrame):
             self._load_panels()
 
     # ── Resize drag ────────────────────────────────────────────────────────────
-    # State is stored on `outer` itself so each panel is independent and
-    # winfo_height() is never used (it returns 1 for unrendered widgets).
+    # container is a plain tk.Frame — configure(height=) is guaranteed reliable.
+    # State stored on the container so each panel is fully independent.
 
-    def _resize_start(self, event, outer: ctk.CTkFrame, panel: dict):
-        outer._rs_start_y = event.y_root
-        outer._rs_start_h = panel.get("panel_height", 260)
+    def _resize_start(self, event, container: tk.Frame, panel: dict):
+        container._rs_y = event.y_root
+        container._rs_h = panel.get("panel_height", 260)
 
-    def _resize_motion(self, event, outer: ctk.CTkFrame, panel: dict):
-        if not hasattr(outer, "_rs_start_y"):
+    def _resize_motion(self, event, container: tk.Frame, panel: dict):
+        if not hasattr(container, "_rs_y"):
             return
-        delta = event.y_root - outer._rs_start_y
-        new_h = max(120, outer._rs_start_h + delta)
-        outer.configure(height=new_h)
+        new_h = max(120, container._rs_h + (event.y_root - container._rs_y))
+        container.configure(height=new_h)
 
-    def _resize_end(self, event, outer: ctk.CTkFrame, panel: dict):
-        if not hasattr(outer, "_rs_start_y"):
+    def _resize_end(self, event, container: tk.Frame, panel: dict):
+        if not hasattr(container, "_rs_y"):
             return
-        delta = event.y_root - outer._rs_start_y
-        new_h = max(120, outer._rs_start_h + delta)
-        outer.configure(height=new_h)
-        panel["panel_height"] = new_h          # update dict so next drag starts right
+        new_h = max(120, container._rs_h + (event.y_root - container._rs_y))
+        container.configure(height=new_h)
+        panel["panel_height"] = new_h
         self.db.update_dm_panel_height(panel["id"], new_h)
         for p in self._panels:
             if p["id"] == panel["id"]:
@@ -894,7 +898,7 @@ class DmShieldPage(ctk.CTkFrame):
 
     # ── Drag and drop ──────────────────────────────────────────────────────────
 
-    def _drag_start(self, event, panel: dict, outer: ctk.CTkFrame):
+    def _drag_start(self, event, panel: dict, container: tk.Frame):
         self._drag_id = panel["id"]
         self._drag_source_idx = next(
             (i for i,p in enumerate(self._panels) if p["id"]==panel["id"]), 0)
@@ -915,13 +919,15 @@ class DmShieldPage(ctk.CTkFrame):
         if not self._drag_ghost: return
         self._move_ghost(event)
         target = self._find_panel_at(event.x_root, event.y_root)
-        for i, w in enumerate(self._panel_widgets):
+        # Highlight inner CTkFrame (first child of each container)
+        for i, c in enumerate(self._panel_widgets):
+            inner = c.winfo_children()[0] if c.winfo_children() else c
             if i == self._drag_source_idx:
-                w.configure(fg_color=SURFACE, border_color=BORDER)
+                inner.configure(fg_color=SURFACE, border_color=BORDER)
             elif i == target:
-                w.configure(fg_color=DRAG_HL, border_color=ACCENT)
+                inner.configure(fg_color=DRAG_HL, border_color=ACCENT)
             else:
-                w.configure(fg_color=SURFACE, border_color=BORDER)
+                inner.configure(fg_color=SURFACE, border_color=BORDER)
         self._drag_over_idx = target
 
     def _move_ghost(self, event):
@@ -944,8 +950,10 @@ class DmShieldPage(ctk.CTkFrame):
             self._drag_ghost.destroy()
             self._drag_ghost = None
 
-        for w in self._panel_widgets:
-            w.configure(fg_color=SURFACE, border_color=BORDER)
+        for c in self._panel_widgets:
+            inner = c.winfo_children()[0] if c.winfo_children() else None
+            if inner:
+                inner.configure(fg_color=SURFACE, border_color=BORDER)
 
         if self._drag_over_idx is not None and self._drag_over_idx != self._drag_source_idx:
             panels = list(self._panels)
