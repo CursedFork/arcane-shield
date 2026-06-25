@@ -31,7 +31,7 @@ class NotesPage(ctk.CTkFrame):
         left = ctk.CTkFrame(self, width=300, fg_color=SURFACE, corner_radius=8)
         left.grid(row=0, column=0, sticky="nsew", padx=(16,8), pady=16)
         left.grid_propagate(False)
-        left.grid_rowconfigure(2, weight=1)
+        left.grid_rowconfigure(3, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
         hdr_row = ctk.CTkFrame(left, fg_color="transparent")
@@ -71,15 +71,37 @@ class NotesPage(ctk.CTkFrame):
                       hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=12),
                       command=self._add_note).grid(row=4, column=0, sticky="ew", padx=10, pady=(0,10))
 
+        # Filters
+        flt = ctk.CTkFrame(left, fg_color="transparent")
+        flt.grid(row=2, column=0, sticky="ew", padx=12, pady=(0,6))
+        flt.columnconfigure((0, 1), weight=1)
+
+        self._filter_session_var = tk.StringVar(value="All Sessions")
+        self._session_cb = ctk.CTkComboBox(flt, variable=self._filter_session_var,
+                                           values=["All Sessions"],
+                                           fg_color=SURFACE2, border_color=BORDER,
+                                           button_color=ACCENT, text_color=TEXT,
+                                           dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                           height=28, font=ctk.CTkFont(size=12),
+                                           command=lambda _: self.refresh())
+        self._session_cb.grid(row=0, column=0, sticky="ew", padx=(0,3))
+
+        self._filter_date_var = tk.StringVar()
+        self._filter_date_var.trace_add("write", lambda *_: self.refresh())
+        ctk.CTkEntry(flt, textvariable=self._filter_date_var,
+                     placeholder_text="Date (YYYY, YYYY-MM…)",
+                     fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=28
+                     ).grid(row=0, column=1, sticky="ew", padx=(3,0))
+
         # List
         self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
-        self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
+        self._list_frame.grid(row=3, column=0, sticky="nsew", padx=4, pady=(0,4))
         self._list_frame.columnconfigure(0, weight=1)
 
         ctk.CTkButton(left, text="Export CSV", height=28, fg_color=SURFACE2,
                       hover_color=BORDER, text_color=MUTED, font=ctk.CTkFont(size=11),
-                      command=self._export).grid(row=3, column=0, sticky="ew", padx=12, pady=(0,12))
+                      command=self._export).grid(row=4, column=0, sticky="ew", padx=12, pady=(0,12))
 
         # ── Right: note detail / edit ──────────────────────────────────────────
         self._right = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=8)
@@ -120,7 +142,12 @@ class NotesPage(ctk.CTkFrame):
                     c.bind("<Button-1>", lambda e, n=note: self._select(n))
 
     def refresh(self):
-        self._notes = self.db.list_notes()
+        self._session_cb.configure(values=["All Sessions"] + self.db.note_sessions())
+        session = self._filter_session_var.get()
+        self._notes = self.db.list_notes(
+            session_label="" if session == "All Sessions" else session,
+            date_prefix=self._filter_date_var.get().strip(),
+        )
         self._render_list()
 
     def _select(self, note: dict):

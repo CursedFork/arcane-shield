@@ -126,9 +126,29 @@ class _ShopsTab(ctk.CTkFrame):
                       hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=12),
                       command=self._add).grid(row=0, column=10, padx=(0,12))
 
+        # Filter bar
+        flt = ctk.CTkFrame(self, fg_color="transparent")
+        flt.grid(row=1, column=0, sticky="ew", pady=(0,6))
+        ctk.CTkLabel(flt, text="Filter", text_color=MUTED, font=ctk.CTkFont(size=12)
+                     ).pack(side="left", padx=(2,6))
+        self._filter_shop_var = tk.StringVar(value="All Shops")
+        self._shop_filter_cb = ctk.CTkComboBox(flt, variable=self._filter_shop_var,
+                                               values=["All Shops"], width=200,
+                                               fg_color=SURFACE2, border_color=BORDER,
+                                               button_color=ACCENT, text_color=TEXT,
+                                               dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                               height=28, font=ctk.CTkFont(size=12),
+                                               command=lambda _: self.refresh())
+        self._shop_filter_cb.pack(side="left", padx=(0,8))
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self.refresh())
+        ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search item…",
+                     fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
+                     height=28, width=240).pack(side="left")
+
         # Table header
         header = ctk.CTkFrame(self, fg_color=SURFACE2, height=30, corner_radius=4)
-        header.grid(row=1, column=0, sticky="new")
+        header.grid(row=2, column=0, sticky="new")
         for col, (label, w) in enumerate([
             ("Shop", 160), ("Item", 200), ("Price", 80), ("Qty", 50), ("Notes", 100), ("", 70)
         ]):
@@ -139,12 +159,12 @@ class _ShopsTab(ctk.CTkFrame):
         # Rows
         self._rows_frame = ctk.CTkScrollableFrame(self, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
-        self._rows_frame.grid(row=2, column=0, sticky="nsew")
-        self.grid_rowconfigure(2, weight=1)
+        self._rows_frame.grid(row=3, column=0, sticky="nsew")
+        self.grid_rowconfigure(3, weight=1)
 
         # Footer
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.grid(row=3, column=0, sticky="ew", pady=(4,0))
+        footer.grid(row=4, column=0, sticky="ew", pady=(4,0))
         ctk.CTkButton(footer, text="Export CSV", height=28, fg_color=SURFACE2,
                       hover_color=BORDER, text_color=MUTED, font=ctk.CTkFont(size=11),
                       command=self._export).pack(side="right", padx=4)
@@ -186,7 +206,12 @@ class _ShopsTab(ctk.CTkFrame):
                               ).grid(row=0, column=4, padx=(0,8))
 
     def refresh(self):
-        self._items = self.db.list_shop_items()
+        self._shop_filter_cb.configure(values=["All Shops"] + self.db.shop_names())
+        shop = self._filter_shop_var.get()
+        self._items = self.db.list_shop_items(
+            shop="" if shop == "All Shops" else shop,
+            search=self._search_var.get().strip(),
+        )
         self._render()
 
     def _add(self):
@@ -252,6 +277,26 @@ class _LootTab(ctk.CTkFrame):
                       hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=12),
                       command=self._add).grid(row=0, column=8, padx=(0,12))
 
+        # Filter bar
+        flt = ctk.CTkFrame(self, fg_color="transparent")
+        flt.grid(row=1, column=0, sticky="ew", pady=(0,6))
+        ctk.CTkLabel(flt, text="Filter", text_color=MUTED, font=ctk.CTkFont(size=12)
+                     ).pack(side="left", padx=(2,6))
+        self._filter_owner_var = tk.StringVar(value="All Owners")
+        self._owner_filter_cb = ctk.CTkComboBox(flt, variable=self._filter_owner_var,
+                                                values=["All Owners"], width=200,
+                                                fg_color=SURFACE2, border_color=BORDER,
+                                                button_color=ACCENT, text_color=TEXT,
+                                                dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                                height=28, font=ctk.CTkFont(size=12),
+                                                command=lambda _: self.refresh())
+        self._owner_filter_cb.pack(side="left", padx=(0,8))
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self.refresh())
+        ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search item…",
+                     fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
+                     height=28, width=240).pack(side="left")
+
         self._rows_frame = ctk.CTkScrollableFrame(self, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
         self._rows_frame.grid(row=2, column=0, sticky="nsew")
@@ -288,7 +333,12 @@ class _LootTab(ctk.CTkFrame):
                               ).grid(row=0, column=2, padx=(0,8))
 
     def refresh(self):
-        self._items = self.db.list_party_items()
+        self._owner_filter_cb.configure(values=["All Owners"] + self.db.party_owners())
+        owner = self._filter_owner_var.get()
+        self._items = self.db.list_party_items(
+            owner="" if owner == "All Owners" else owner,
+            search=self._search_var.get().strip(),
+        )
         self._render()
 
     def _add(self):

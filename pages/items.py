@@ -86,6 +86,25 @@ class ItemsPage(ctk.CTkFrame):
                         command=lambda _: self._apply_filters()
                         ).grid(row=1, column=1, sticky="ew", padx=(3,0))
 
+        self._attune_var = tk.StringVar(value="Any Attunement")
+        ctk.CTkComboBox(flt, variable=self._attune_var,
+                        values=["Any Attunement", "Requires Attunement", "No Attunement"],
+                        fg_color=SURFACE2, border_color=BORDER,
+                        button_color=ACCENT, text_color=TEXT,
+                        dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                        height=28, font=ctk.CTkFont(size=12),
+                        command=lambda _: self._apply_filters()
+                        ).grid(row=2, column=0, sticky="ew", padx=(0,3), pady=(4,0))
+
+        self._tag_var = tk.StringVar(value="All Tags")
+        self._tag_cb = ctk.CTkComboBox(flt, variable=self._tag_var, values=["All Tags"],
+                                       fg_color=SURFACE2, border_color=BORDER,
+                                       button_color=ACCENT, text_color=TEXT,
+                                       dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                       height=28, font=ctk.CTkFont(size=12),
+                                       command=lambda _: self._apply_filters())
+        self._tag_cb.grid(row=2, column=1, sticky="ew", padx=(3,0), pady=(4,0))
+
         # Item list
         self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
@@ -131,10 +150,15 @@ class ItemsPage(ctk.CTkFrame):
         search = self._search_var.get().strip()
         rtype = self._type_var.get()
         rarity = self._rarity_var.get()
+        attune = {"Requires Attunement": "yes", "No Attunement": "no"}.get(
+            self._attune_var.get(), "")
+        tag = self._tag_var.get()
         items = self.db.list_items(
             search=search,
             item_type="" if rtype == "All Types" else rtype,
             rarity="" if rarity == "All Rarities" else rarity,
+            attunement=attune,
+            tag="" if tag == "All Tags" else tag,
         )
         self._items = items
         self._render_list(items)
@@ -142,6 +166,7 @@ class ItemsPage(ctk.CTkFrame):
     def refresh(self):
         types = self.db.item_types()
         self._type_cb.configure(values=["All Types"] + types)
+        self._tag_cb.configure(values=["All Tags"] + self.db.item_tags())
         self._apply_filters()
 
     # ── Selection / Detail ─────────────────────────────────────────────────────

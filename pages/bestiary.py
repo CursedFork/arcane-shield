@@ -48,7 +48,7 @@ class BestiaryPage(ctk.CTkFrame):
 
         flt = ctk.CTkFrame(left, fg_color="transparent")
         flt.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
-        flt.columnconfigure(0, weight=1)
+        flt.columnconfigure((0, 1), weight=1)
 
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._apply_filters())
@@ -63,7 +63,16 @@ class BestiaryPage(ctk.CTkFrame):
                                        dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
                                        height=28, font=ctk.CTkFont(size=12),
                                        command=lambda _: self._apply_filters())
-        self._cr_cb.grid(row=1, column=0, sticky="ew")
+        self._cr_cb.grid(row=1, column=0, sticky="ew", padx=(0,3))
+
+        self._type_var = tk.StringVar(value="All Types")
+        self._type_cb = ctk.CTkComboBox(flt, variable=self._type_var, values=["All Types"],
+                                        fg_color=SURFACE2, border_color=BORDER,
+                                        button_color=ACCENT, text_color=TEXT,
+                                        dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                        height=28, font=ctk.CTkFont(size=12),
+                                        command=lambda _: self._apply_filters())
+        self._type_cb.grid(row=1, column=1, sticky="ew", padx=(3,0))
 
         self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
@@ -102,13 +111,19 @@ class BestiaryPage(ctk.CTkFrame):
     def _apply_filters(self):
         search = self._search_var.get().strip()
         cr = self._cr_var.get()
-        entries = self.db.list_bestiary(search=search, cr="" if cr == "All CR" else cr)
+        mtype = self._type_var.get()
+        entries = self.db.list_bestiary(
+            search=search,
+            cr="" if cr == "All CR" else cr,
+            tag="" if mtype == "All Types" else mtype,
+        )
         self._entries = entries
         self._render_list(entries)
 
     def refresh(self):
         crs = self.db.bestiary_crs()
         self._cr_cb.configure(values=["All CR"] + crs)
+        self._type_cb.configure(values=["All Types"] + self.db.bestiary_types())
         self._apply_filters()
 
     def _select(self, entry: dict):

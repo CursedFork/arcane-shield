@@ -46,11 +46,34 @@ class MechanicsPage(ctk.CTkFrame):
                       font=ctk.CTkFont(size=12),
                       command=self._clear_all).grid(row=0, column=2, sticky="e", padx=(4,0))
 
+        flt = ctk.CTkFrame(left, fg_color="transparent")
+        flt.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
+        flt.columnconfigure((0, 1), weight=1)
+
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self.refresh())
-        ctk.CTkEntry(left, textvariable=self._search_var, placeholder_text="Search…",
+        ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=30
-                     ).grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
+                     ).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0,4))
+
+        self._campaign_var = tk.StringVar(value="All Campaigns")
+        self._campaign_cb = ctk.CTkComboBox(flt, variable=self._campaign_var,
+                                            values=["All Campaigns"],
+                                            fg_color=SURFACE2, border_color=BORDER,
+                                            button_color=ACCENT, text_color=TEXT,
+                                            dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                            height=28, font=ctk.CTkFont(size=12),
+                                            command=lambda _: self.refresh())
+        self._campaign_cb.grid(row=1, column=0, sticky="ew", padx=(0,3))
+
+        self._tag_var = tk.StringVar(value="All Types")
+        self._tag_cb = ctk.CTkComboBox(flt, variable=self._tag_var, values=["All Types"],
+                                       fg_color=SURFACE2, border_color=BORDER,
+                                       button_color=ACCENT, text_color=TEXT,
+                                       dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                       height=28, font=ctk.CTkFont(size=12),
+                                       command=lambda _: self.refresh())
+        self._tag_cb.grid(row=1, column=1, sticky="ew", padx=(3,0))
 
         self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
@@ -85,7 +108,15 @@ class MechanicsPage(ctk.CTkFrame):
                 c.bind("<Button-1>", lambda e, it=item: self._select(it))
 
     def refresh(self):
-        self._items = self.db.list_mechanics(search=self._search_var.get().strip())
+        self._campaign_cb.configure(values=["All Campaigns"] + self.db.mechanic_campaigns())
+        self._tag_cb.configure(values=["All Types"] + self.db.mechanic_tags())
+        campaign = self._campaign_var.get()
+        tag = self._tag_var.get()
+        self._items = self.db.list_mechanics(
+            search=self._search_var.get().strip(),
+            campaign="" if campaign == "All Campaigns" else campaign,
+            tag="" if tag == "All Types" else tag,
+        )
         self._render_list()
 
     def _select(self, item: dict):

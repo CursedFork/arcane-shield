@@ -190,7 +190,8 @@ class Database:
 
     # ── Magic Items ────────────────────────────────────────────────────────────
 
-    def list_items(self, search="", item_type="", rarity="") -> list[dict]:
+    def list_items(self, search="", item_type="", rarity="",
+                   attunement="", tag="") -> list[dict]:
         q = "SELECT * FROM magic_items WHERE 1=1"
         p: list = []
         if search:
@@ -199,8 +200,15 @@ class Database:
             q += " AND item_type=?"; p.append(item_type)
         if rarity:
             q += " AND rarity=?"; p.append(rarity)
+        if attunement == "yes":
+            q += " AND requires_attunement=1"
+        elif attunement == "no":
+            q += " AND requires_attunement=0"
         q += " ORDER BY name"
-        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        if tag:
+            rows = [r for r in rows if tag in r.get("tags", [])]
+        return rows
 
     def create_item(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
@@ -235,16 +243,34 @@ class Database:
             "SELECT DISTINCT item_type FROM magic_items WHERE item_type!='' ORDER BY item_type"
         ).fetchall()]
 
+    def _distinct_tags(self, table: str) -> list[str]:
+        """Collect the unique set of tags across every row of a tagged table."""
+        out: set[str] = set()
+        for r in self.conn.execute(f"SELECT tags FROM {table}").fetchall():
+            try:
+                for t in json.loads(r[0] or "[]"):
+                    if t:
+                        out.add(t)
+            except Exception:
+                pass
+        return sorted(out, key=str.lower)
+
+    def item_tags(self) -> list[str]:
+        return self._distinct_tags("magic_items")
+
     # ── Bestiary ───────────────────────────────────────────────────────────────
 
-    def list_bestiary(self, search="", cr="") -> list[dict]:
+    def list_bestiary(self, search="", cr="", tag="") -> list[dict]:
         q = "SELECT * FROM bestiary WHERE 1=1"; p: list = []
         if search:
             q += " AND name LIKE ?"; p.append(f"%{search}%")
         if cr:
             q += " AND cr=?"; p.append(cr)
         q += " ORDER BY name"
-        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        if tag:
+            rows = [r for r in rows if tag in r.get("tags", [])]
+        return rows
 
     def create_bestiary_entry(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
@@ -273,14 +299,32 @@ class Database:
             "SELECT DISTINCT cr FROM bestiary ORDER BY CAST(cr AS REAL)"
         ).fetchall()]
 
+    def bestiary_types(self) -> list[str]:
+        """Monster types/keywords drawn from tags (e.g. Undead, Dragon, Fiend)."""
+        return self._distinct_tags("bestiary")
+
     # ── Mechanics ──────────────────────────────────────────────────────────────
 
-    def list_mechanics(self, search="") -> list[dict]:
+    def list_mechanics(self, search="", campaign="", tag="") -> list[dict]:
         q = "SELECT * FROM mechanics WHERE 1=1"; p: list = []
         if search:
             q += " AND (title LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        if campaign:
+            q += " AND campaign=?"; p.append(campaign)
         q += " ORDER BY title"
-        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        if tag:
+            rows = [r for r in rows if tag in r.get("tags", [])]
+        return rows
+
+    def mechanic_campaigns(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT campaign FROM mechanics WHERE campaign IS NOT NULL AND campaign!='' ORDER BY campaign"
+        ).fetchall()]
+
+    def mechanic_tags(self) -> list[str]:
+        """Mechanic categories drawn from tags (e.g. Combat, Resting, Travel)."""
+        return self._distinct_tags("mechanics")
 
     def create_mechanic(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
@@ -304,12 +348,18 @@ class Database:
 
     # ── Campaigns ──────────────────────────────────────────────────────────────
 
-    def list_campaigns(self, search="") -> list[dict]:
+    def list_campaigns(self, search="", tag="") -> list[dict]:
         q = "SELECT * FROM campaigns WHERE 1=1"; p: list = []
         if search:
             q += " AND (title LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
         q += " ORDER BY title"
-        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        if tag:
+            rows = [r for r in rows if tag in r.get("tags", [])]
+        return rows
+
+    def campaign_tags(self) -> list[str]:
+        return self._distinct_tags("campaigns")
 
     def create_campaign(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
@@ -333,10 +383,19 @@ class Database:
 
     # ── Notes ──────────────────────────────────────────────────────────────────
 
-    def list_notes(self) -> list[dict]:
-        return _rows(self.conn.execute(
-            "SELECT * FROM notes ORDER BY session_label DESC, note_date DESC, id DESC"
-        ).fetchall())
+    def list_notes(self, session_label="", date_prefix="") -> list[dict]:
+        q = "SELECT * FROM notes WHERE 1=1"; p: list = []
+        if session_label:
+            q += " AND session_label=?"; p.append(session_label)
+        if date_prefix:
+            q += " AND note_date LIKE ?"; p.append(f"{date_prefix}%")
+        q += " ORDER BY session_label DESC, note_date DESC, id DESC"
+        return _rows(self.conn.execute(q, p).fetchall())
+
+    def note_sessions(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT session_label FROM notes ORDER BY session_label"
+        ).fetchall()]
 
     def create_note(self, d: dict) -> int:
         cur = self.conn.execute(
@@ -358,10 +417,19 @@ class Database:
 
     # ── Shops ──────────────────────────────────────────────────────────────────
 
-    def list_shop_items(self) -> list[dict]:
-        return _rows(self.conn.execute(
-            "SELECT * FROM shops ORDER BY shop_name, item_name"
-        ).fetchall())
+    def list_shop_items(self, shop="", search="") -> list[dict]:
+        q = "SELECT * FROM shops WHERE 1=1"; p: list = []
+        if shop:
+            q += " AND shop_name=?"; p.append(shop)
+        if search:
+            q += " AND item_name LIKE ?"; p.append(f"%{search}%")
+        q += " ORDER BY shop_name, item_name"
+        return _rows(self.conn.execute(q, p).fetchall())
+
+    def shop_names(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT shop_name FROM shops ORDER BY shop_name"
+        ).fetchall()]
 
     def create_shop_item(self, d: dict) -> int:
         cur = self.conn.execute(
@@ -383,10 +451,19 @@ class Database:
 
     # ── Party Items ────────────────────────────────────────────────────────────
 
-    def list_party_items(self) -> list[dict]:
-        return _rows(self.conn.execute(
-            "SELECT * FROM party_items ORDER BY owner, item_name"
-        ).fetchall())
+    def list_party_items(self, owner="", search="") -> list[dict]:
+        q = "SELECT * FROM party_items WHERE 1=1"; p: list = []
+        if owner:
+            q += " AND owner=?"; p.append(owner)
+        if search:
+            q += " AND item_name LIKE ?"; p.append(f"%{search}%")
+        q += " ORDER BY owner, item_name"
+        return _rows(self.conn.execute(q, p).fetchall())
+
+    def party_owners(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT owner FROM party_items ORDER BY owner"
+        ).fetchall()]
 
     def create_party_item(self, d: dict) -> int:
         cur = self.conn.execute(
