@@ -3,8 +3,15 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
+import ctypes
 import customtkinter as ctk
 from db import Database
+
+# Tell Windows this is its own app so the taskbar shows the custom icon
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("arcane.shield.dm")
+except Exception:
+    pass
 from pages.items import ItemsPage
 from pages.bestiary import BestiaryPage
 from pages.mechanics import MechanicsPage
