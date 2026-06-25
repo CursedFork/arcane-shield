@@ -110,13 +110,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
             sort_order INTEGER NOT NULL DEFAULT 0,
             width INTEGER NOT NULL DEFAULT 1,
             panel_type TEXT NOT NULL DEFAULT 'text',
-            panel_height INTEGER NOT NULL DEFAULT 260
+            panel_height INTEGER NOT NULL DEFAULT 260,
+            pos_x INTEGER NOT NULL DEFAULT 20,
+            pos_y INTEGER NOT NULL DEFAULT 20,
+            width_px INTEGER NOT NULL DEFAULT 360,
+            height_px INTEGER NOT NULL DEFAULT 260
         );
     """)
     # Backfill columns for DBs that predate them
     for col, defn in [
         ("panel_type",   "TEXT NOT NULL DEFAULT 'text'"),
         ("panel_height", "INTEGER NOT NULL DEFAULT 260"),
+        ("pos_x",        "INTEGER NOT NULL DEFAULT 20"),
+        ("pos_y",        "INTEGER NOT NULL DEFAULT 20"),
+        ("width_px",     "INTEGER NOT NULL DEFAULT 360"),
+        ("height_px",    "INTEGER NOT NULL DEFAULT 260"),
     ]:
         try:
             conn.execute(f"ALTER TABLE dm_shield_panels ADD COLUMN {col} {defn}")
@@ -459,16 +467,20 @@ class Database:
 
     def create_dm_panel(self, tab_id: int, title: str, content: str = "",
                         width: int = 1, panel_type: str = "text",
-                        panel_height: int = 260) -> int:
+                        panel_height: int = 260,
+                        pos_x: int = 20, pos_y: int = 20,
+                        width_px: int = 360, height_px: int = 260) -> int:
         max_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order),0) FROM dm_shield_panels WHERE tab_id=?",
             (tab_id,)
         ).fetchone()[0]
         cur = self.conn.execute(
             "INSERT INTO dm_shield_panels "
-            "(tab_id,title,content,sort_order,width,panel_type,panel_height) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (tab_id, title, content, max_order + 1, width, panel_type, panel_height)
+            "(tab_id,title,content,sort_order,width,panel_type,panel_height,"
+            " pos_x,pos_y,width_px,height_px) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (tab_id, title, content, max_order + 1, width, panel_type, panel_height,
+             pos_x, pos_y, width_px, height_px)
         )
         self.conn.commit()
         return cur.lastrowid
@@ -484,6 +496,15 @@ class Database:
     def update_dm_panel_height(self, id: int, height: int) -> None:
         self.conn.execute(
             "UPDATE dm_shield_panels SET panel_height=? WHERE id=?", (height, id)
+        )
+        self.conn.commit()
+
+    def update_dm_panel_geometry(self, id: int, pos_x: int, pos_y: int,
+                                 width_px: int, height_px: int) -> None:
+        """Persist a panel's free-form canvas geometry (position + size)."""
+        self.conn.execute(
+            "UPDATE dm_shield_panels SET pos_x=?, pos_y=?, width_px=?, height_px=? WHERE id=?",
+            (pos_x, pos_y, width_px, height_px, id)
         )
         self.conn.commit()
 

@@ -40,6 +40,17 @@ RARITY_COLORS = {
     "Very Rare": "#a335ee", "Legendary": "#ff8000", "Artifact": "#e6cc80",
 }
 
+# Free-form canvas layout constants
+MIN_W      = 220     # minimum panel width  (px)
+MIN_H      = 120     # minimum panel height (px)
+HEADER_H   = 34      # panel title-bar height
+GRIP       = 16      # corner resize-grip size
+EDGE       = 8       # edge resize-strip thickness
+MARGIN     = 16      # gutter when auto-arranging
+GAP        = 14      # gap between auto-arranged panels
+DEF_W      = 360     # default new-panel width
+DEF_H      = 260     # default new-panel height
+
 
 class DmShieldPage(ctk.CTkFrame):
     def __init__(self, parent, db):
@@ -48,15 +59,10 @@ class DmShieldPage(ctk.CTkFrame):
         self._active_tab: dict | None = None
         self._panels: list[dict] = []
 
-        # Move-drag state
-        self._drag_id: int | None = None
-        self._drag_source_idx: int = 0
-        self._drag_ghost: tk.Toplevel | None = None
-        self._drag_over_idx: int | None = None
-        self._drag_offset_x = 0
-        self._drag_offset_y = 0
-        self._panel_widgets: list[ctk.CTkFrame] = []
-
+        # Canvas item registry: panel_id -> dict(item, frame, x, y, w, h)
+        self._items: dict[int, dict] = {}
+        # Active gesture state (move or resize)
+        self._gesture: dict | None = None
 
         self._build()
 
@@ -66,6 +72,7 @@ class DmShieldPage(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
+        # ── Tab bar ──────────────────────────────────────────────────────────
         self._tab_bar = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=8, height=46)
         self._tab_bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 4))
         self._tab_bar.grid_propagate(False)
@@ -74,17 +81,44 @@ class DmShieldPage(ctk.CTkFrame):
         self._tab_inner.pack(side="left", fill="both", expand=True, padx=4, pady=4)
 
         ctk.CTkButton(
-            self._tab_bar, text="+ Tab", width=72, height=30,
+            self._tab_bar, text="+ Tab", width=64, height=30,
             fg_color="transparent", hover_color=SURFACE2,
             text_color=MUTED, font=ctk.CTkFont(size=12),
             command=self._new_tab
         ).pack(side="right", padx=(0, 8), pady=8)
 
-        self._canvas_frame = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", scrollbar_button_color=ACCENT
-        )
-        self._canvas_frame.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 16))
-        self._canvas_frame.columnconfigure((0, 1, 2), weight=1)
+        ctk.CTkButton(
+            self._tab_bar, text="⊞ Layouts", width=86, height=30,
+            fg_color="transparent", hover_color=SURFACE2,
+            text_color=MUTED, font=ctk.CTkFont(size=12),
+            command=self._open_layouts_menu
+        ).pack(side="right", padx=(0, 2), pady=8)
+
+        ctk.CTkButton(
+            self._tab_bar, text="+ Panel", width=72, height=30,
+            fg_color=ACCENT, hover_color=ACCENT_H,
+            text_color=TEXT, font=ctk.CTkFont(size=12),
+            command=self._new_panel
+        ).pack(side="right", padx=(0, 2), pady=8)
+
+        # ── Free-form canvas (absolute panel positioning) ────────────────────
+        wrap = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=8)
+        wrap.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 16))
+        wrap.grid_rowconfigure(0, weight=1)
+        wrap.grid_columnconfigure(0, weight=1)
+
+        self._canvas = tk.Canvas(wrap, bg=BG, highlightthickness=0, bd=0)
+        self._canvas.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+
+        self._vbar = ctk.CTkScrollbar(wrap, orientation="vertical",
+                                      command=self._canvas.yview,
+                                      button_color=ACCENT)
+        self._vbar.grid(row=0, column=1, sticky="ns", pady=2)
+        self._canvas.configure(yscrollcommand=self._vbar.set)
+
+        # Mouse-wheel scrolls the canvas (when not over an inner scroll area)
+        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind("<Configure>", lambda e: self._update_scrollregion())
 
     # ── Tab bar ────────────────────────────────────────────────────────────────
 
@@ -159,77 +193,90 @@ class DmShieldPage(ctk.CTkFrame):
             self._render_panels([])
             return
         self._panels = self.db.list_dm_panels(self._active_tab["id"])
+        self._dedupe_positions(self._panels)
         self._render_panels(self._panels)
 
+    def _dedupe_positions(self, panels: list[dict]):
+        """One-time fix: panels migrated from the old grid layout all share the
+        default (20,20). Cascade any exact-overlap duplicates so none hide."""
+        seen: set[tuple[int, int]] = set()
+        changed = False
+        for i, p in enumerate(panels):
+            pos = (p.get("pos_x", 20), p.get("pos_y", 20))
+            if pos in seen:
+                nx = MARGIN + (i * 30) % 600
+                ny = MARGIN + (i * 30) % 360
+                p["pos_x"], p["pos_y"] = nx, ny
+                self.db.update_dm_panel_geometry(
+                    p["id"], nx, ny,
+                    max(MIN_W, p.get("width_px", DEF_W)),
+                    max(MIN_H, p.get("height_px", DEF_H)))
+                changed = True
+            seen.add((p.get("pos_x", 20), p.get("pos_y", 20)))
+        return changed
+
     def _render_panels(self, panels: list[dict]):
-        for w in self._canvas_frame.winfo_children():
-            w.destroy()
-        self._panel_widgets = []
+        # Clear canvas
+        self._canvas.delete("all")
+        for rec in self._items.values():
+            try:
+                rec["frame"].destroy()
+            except Exception:
+                pass
+        self._items = {}
 
         if not self._active_tab:
-            ctk.CTkLabel(
-                self._canvas_frame,
-                text="No tabs yet — click  + Tab  to create your first DM screen.",
-                text_color=MUTED, font=ctk.CTkFont(size=14)
-            ).grid(row=0, column=0, columnspan=3, pady=60)
+            self._canvas.create_text(
+                30, 40, anchor="nw", fill=MUTED, font=("Segoe UI", 13),
+                text="No tabs yet — click  + Tab  to create your first DM screen."
+            )
             return
-
-        ctk.CTkButton(
-            self._canvas_frame, text="+ Add Panel", height=36,
-            fg_color=SURFACE, hover_color=SURFACE2, text_color=MUTED,
-            font=ctk.CTkFont(size=13), border_color=BORDER, border_width=2,
-            corner_radius=8, command=self._new_panel
-        ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=4, pady=(4, 8))
 
         if not panels:
-            ctk.CTkLabel(
-                self._canvas_frame,
-                text="No panels yet — click  + Add Panel  to build your DM screen.",
-                text_color=MUTED, font=ctk.CTkFont(size=13)
-            ).grid(row=1, column=0, columnspan=3, pady=40)
+            self._canvas.create_text(
+                30, 40, anchor="nw", fill=MUTED, font=("Segoe UI", 13),
+                text="No panels yet — click  + Panel  to build your DM screen,\n"
+                     "or pick a starter from  ⊞ Layouts."
+            )
             return
 
-        col, row = 0, 1
-        for idx, panel in enumerate(panels):
-            span = min(panel.get("width", 1), 3)
-            if col + span > 3:
-                col = 0; row += 1
-            widget = self._make_panel_widget(panel, idx)
-            # "new" = fills width, pins to top — panels in the same row are
-            # independently sized and do NOT stretch each other vertically.
-            widget.grid(row=row, column=col, columnspan=span,
-                        sticky="new", padx=4, pady=4)
-            self._panel_widgets.append(widget)
-            col += span
-            if col >= 3:
-                col = 0; row += 1
+        for panel in panels:
+            self._place_panel(panel)
+        self._update_scrollregion()
 
-    # ── Panel shell (header + body + resize grip) ─────────────────────────────
+    def _place_panel(self, panel: dict):
+        """Create a panel frame and embed it on the canvas at its stored geometry."""
+        x = max(0, panel.get("pos_x", 20))
+        y = max(0, panel.get("pos_y", 20))
+        w = max(MIN_W, panel.get("width_px", DEF_W))
+        h = max(MIN_H, panel.get("height_px", DEF_H))
 
-    def _make_panel_widget(self, panel: dict, idx: int) -> tk.Frame:
+        frame = self._make_panel_frame(panel)
+        item = self._canvas.create_window(x, y, anchor="nw", window=frame,
+                                          width=w, height=h)
+        self._items[panel["id"]] = {
+            "item": item, "frame": frame, "panel": panel,
+            "x": x, "y": y, "w": w, "h": h,
+        }
+
+    # ── Panel shell (header + body + move/resize grips) ───────────────────────
+
+    def _make_panel_frame(self, panel: dict) -> ctk.CTkFrame:
         ptype = panel.get("panel_type", "text")
-        ph    = max(120, panel.get("panel_height", 260))
+        pid   = panel["id"]
 
-        # Plain tk.Frame is the gridded container — configure(height=) is
-        # guaranteed to work on tk.Frame with pack_propagate(False).
-        # ctk.CTkFrame does NOT reliably update its drawn height after creation.
-        container = tk.Frame(self._canvas_frame, bg=BG, height=ph)
-        container.pack_propagate(False)
-        container._panel_id  = panel["id"]
-        container._panel_idx = idx
+        # The embedded window is sized by the canvas (create_window width/height),
+        # so the frame itself never needs configure(height=) — fully reliable.
+        outer = ctk.CTkFrame(self._canvas, fg_color=SURFACE,
+                             corner_radius=8, border_color=BORDER, border_width=1)
 
-        # CTkFrame fills the container for visuals only
-        outer = ctk.CTkFrame(container, fg_color=SURFACE,
-                              corner_radius=8, border_color=BORDER, border_width=1)
-        outer.pack(fill="both", expand=True, padx=1, pady=1)
-
-        # ── Header ────────────────────────────────────────────────────────────
-        header = ctk.CTkFrame(outer, fg_color=SURFACE2, corner_radius=0, height=34)
+        # ── Header (drag to MOVE) ─────────────────────────────────────────────
+        header = ctk.CTkFrame(outer, fg_color=SURFACE2, corner_radius=0, height=HEADER_H)
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
 
         grip = ctk.CTkLabel(header, text="⠿", text_color=MUTED,
-                             font=ctk.CTkFont(size=16), width=24, cursor="fleur")
+                            font=ctk.CTkFont(size=16), width=24, cursor="fleur")
         grip.pack(side="left", padx=(6, 2))
 
         type_icon = PANEL_TYPES.get(ptype, "📝  Custom Text").split("  ")[0]
@@ -237,12 +284,6 @@ class DmShieldPage(ctk.CTkFrame):
                      text_color=TEXT, font=ctk.CTkFont(size=13, weight="bold")
                      ).pack(side="left", fill="x", expand=True, padx=4)
 
-        w_labels = {1: "↔ Wide", 2: "↔ Full", 3: "↕ Narrow"}
-        ctk.CTkButton(header, text=w_labels.get(panel.get("width", 1), "↔ Wide"),
-                      width=72, height=24, fg_color="transparent", hover_color=SURFACE,
-                      text_color=MUTED, font=ctk.CTkFont(size=10),
-                      command=lambda p=panel: self._toggle_width(p)
-                      ).pack(side="right", padx=2)
         ctk.CTkButton(header, text="✎", width=28, height=24,
                       fg_color="transparent", hover_color=SURFACE, text_color=MUTED,
                       font=ctk.CTkFont(size=12),
@@ -269,30 +310,34 @@ class DmShieldPage(ctk.CTkFrame):
             "shops":       self._body_shops,
             "party_items": self._body_party_items,
         }.get(ptype, self._body_text)
-
         renderer(body, panel)
 
-        # ── Resize grip (bottom strip, inside outer for visuals) ──────────────
-        resize_grip = tk.Frame(outer, bg=BORDER, height=6, cursor="size_ns")
-        resize_grip.pack(fill="x", side="bottom")
-
-        resize_grip.bind("<Enter>", lambda e, f=resize_grip: f.configure(bg=ACCENT))
-        resize_grip.bind("<Leave>", lambda e, f=resize_grip: f.configure(bg=BORDER))
-        # Bind to container (the tk.Frame whose height we control)
-        resize_grip.bind("<ButtonPress-1>",
-                         lambda e, c=container, p=panel: self._resize_start(e, c, p))
-        resize_grip.bind("<B1-Motion>",
-                         lambda e, c=container, p=panel: self._resize_motion(e, c, p))
-        resize_grip.bind("<ButtonRelease-1>",
-                         lambda e, c=container, p=panel: self._resize_end(e, c, p))
-
-        # ── Move-drag bindings on header grip ─────────────────────────────────
+        # ── Move bindings (header + grip) ─────────────────────────────────────
         for w in (grip, header):
-            w.bind("<ButtonPress-1>",  lambda e, p=panel, c=container: self._drag_start(e, p, c))
-            w.bind("<B1-Motion>",       self._drag_motion)
-            w.bind("<ButtonRelease-1>", self._drag_end)
+            w.bind("<ButtonPress-1>",   lambda e, i=pid: self._move_start(e, i))
+            w.bind("<B1-Motion>",       lambda e, i=pid: self._move_motion(e, i))
+            w.bind("<ButtonRelease-1>", lambda e, i=pid: self._gesture_end(i))
+            w.bind("<Button-1>",        lambda e, i=pid: self._raise_panel(i), add="+")
 
-        return container
+        # ── Resize grips (overlaid via place; kept clear of inner scrollbars) ──
+        # Bottom edge → height. Reserve the right end for the corner grip so the
+        # two never fight, and so neither covers the body's inner scrollbar.
+        bottom = tk.Frame(outer, bg=SURFACE2, cursor="size_ns", height=EDGE)
+        bottom.place(relx=0, rely=1.0, anchor="sw", x=0, y=0,
+                     relwidth=1.0, width=-GRIP, height=EDGE)
+        # Corner → width + height (primary resize handle)
+        corner = tk.Frame(outer, bg=ACCENT, cursor="bottom_right_corner",
+                          width=GRIP, height=GRIP)
+        corner.place(relx=1.0, rely=1.0, anchor="se", width=GRIP, height=GRIP)
+
+        bottom.bind("<ButtonPress-1>",  lambda e, i=pid: self._resize_start(e, i, "h"))
+        bottom.bind("<B1-Motion>",      lambda e, i=pid: self._resize_motion(e, i))
+        bottom.bind("<ButtonRelease-1>",lambda e, i=pid: self._gesture_end(i))
+        corner.bind("<ButtonPress-1>",  lambda e, i=pid: self._resize_start(e, i, "wh"))
+        corner.bind("<B1-Motion>",      lambda e, i=pid: self._resize_motion(e, i))
+        corner.bind("<ButtonRelease-1>",lambda e, i=pid: self._gesture_end(i))
+
+        return outer
 
     # ── Panel body renderers ───────────────────────────────────────────────────
 
@@ -791,18 +836,19 @@ class DmShieldPage(ctk.CTkFrame):
                      border_color=BORDER, text_color=TEXT, height=30
                      ).grid(row=0, column=1, sticky="ew")
 
-        # Width
-        width_row = ctk.CTkFrame(dlg, fg_color="transparent")
-        width_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0,4))
-        ctk.CTkLabel(width_row, text="Width", text_color=MUTED,
-                     font=ctk.CTkFont(size=12), width=46, anchor="e"
+        # Size hint (panels are freely resized on the board by dragging)
+        size_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        size_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0,4))
+        if is_new:
+            hint = "Size: drop a default panel, then drag its edges/corner to resize."
+        else:
+            cur = self._items.get(panel["id"])
+            dims = f"{cur['w']}×{cur['h']} px" if cur else \
+                   f"{panel.get('width_px', DEF_W)}×{panel.get('height_px', DEF_H)} px"
+            hint = f"Size: {dims}  ·  drag the panel's edges/corner on the board to resize."
+        ctk.CTkLabel(size_row, text=hint, text_color=MUTED,
+                     font=ctk.CTkFont(size=11), anchor="w"
                      ).pack(side="left", padx=(0,8))
-        width_var = tk.StringVar(value=str(panel.get("width",1) if panel else 1))
-        for lbl, val in [("Narrow (1 col)","1"), ("Wide (2 col)","2"), ("Full (3 col)","3")]:
-            ctk.CTkRadioButton(width_row, text=lbl, variable=width_var, value=val,
-                               text_color=TEXT, fg_color=ACCENT, hover_color=ACCENT_H,
-                               border_color=BORDER, font=ctk.CTkFont(size=12)
-                               ).pack(side="left", padx=8)
 
         # Content (only shown for text type)
         content_lbl = ctk.CTkLabel(dlg, text="Content", text_color=MUTED,
@@ -842,12 +888,15 @@ class DmShieldPage(ctk.CTkFrame):
             if not t:
                 messagebox.showerror("Validation","Title is required."); return
             c = tb.get("1.0","end").rstrip() if type_var.get()=="text" else ""
-            w = int(width_var.get())
             pt = type_var.get()
             if is_new:
-                self.db.create_dm_panel(self._active_tab["id"], t, c, w, pt)
+                x, y = self._next_panel_pos()
+                self.db.create_dm_panel(self._active_tab["id"], t, c, 1, pt,
+                                        pos_x=x, pos_y=y,
+                                        width_px=DEF_W, height_px=DEF_H)
             else:
-                self.db.update_dm_panel(panel["id"], t, c, w, pt)
+                self.db.update_dm_panel(panel["id"], t, c,
+                                        panel.get("width", 1), pt)
             dlg.destroy()
             self._load_panels()
 
@@ -858,112 +907,184 @@ class DmShieldPage(ctk.CTkFrame):
                       fg_color=ACCENT, hover_color=ACCENT_H, text_color=TEXT,
                       command=save).pack(side="right", padx=(0,8))
 
-    def _toggle_width(self, panel: dict):
-        new_width = (panel.get("width",1) % 3) + 1
-        self.db.update_dm_panel(panel["id"], panel["title"],
-                                panel.get("content",""), new_width,
-                                panel.get("panel_type","text"))
-        self._load_panels()
-
     def _delete_panel(self, panel: dict):
         if messagebox.askyesno("Delete Panel", f"Delete '{panel['title']}'?"):
             self.db.delete_dm_panel(panel["id"])
             self._load_panels()
 
-    # ── Resize drag ────────────────────────────────────────────────────────────
-    # container is a plain tk.Frame — configure(height=) is guaranteed reliable.
-    # State stored on the container so each panel is fully independent.
+    # ── Canvas helpers ───────────────────────────────────────────────────────
 
-    def _resize_start(self, event, container: tk.Frame, panel: dict):
-        container._rs_y = event.y_root
-        container._rs_h = panel.get("panel_height", 260)
+    def _canvas_width(self) -> int:
+        w = self._canvas.winfo_width()
+        return w if w > 1 else 900
 
-    def _resize_motion(self, event, container: tk.Frame, panel: dict):
-        if not hasattr(container, "_rs_y"):
+    def _update_scrollregion(self):
+        items = list(self._items.values())
+        if items:
+            bottom = max(r["y"] + r["h"] for r in items) + MARGIN
+            right  = max(r["x"] + r["w"] for r in items) + MARGIN
+        else:
+            bottom = right = 0
+        height = max(bottom, self._canvas.winfo_height())
+        width  = max(right, self._canvas_width())
+        self._canvas.configure(scrollregion=(0, 0, width, height))
+
+    def _on_mousewheel(self, event):
+        self._canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _raise_panel(self, pid: int):
+        rec = self._items.get(pid)
+        if rec:
+            self._canvas.tag_raise(rec["item"])
+
+    def _next_panel_pos(self) -> tuple[int, int]:
+        """Cascade new panels so they don't perfectly overlap existing ones."""
+        n = len(self._items)
+        x = MARGIN + (n * 28) % max(1, (self._canvas_width() - DEF_W - MARGIN))
+        y = MARGIN + (n * 28) % 360
+        return int(x), int(y)
+
+    # ── Move gesture ─────────────────────────────────────────────────────────
+
+    def _move_start(self, event, pid: int):
+        rec = self._items.get(pid)
+        if not rec:
             return
-        new_h = max(120, container._rs_h + (event.y_root - container._rs_y))
-        container.configure(height=new_h)
+        self._raise_panel(pid)
+        self._gesture = {
+            "pid": pid, "mode": "move",
+            "mx": event.x_root, "my": event.y_root,
+            "x0": rec["x"], "y0": rec["y"],
+        }
 
-    def _resize_end(self, event, container: tk.Frame, panel: dict):
-        if not hasattr(container, "_rs_y"):
+    def _move_motion(self, event, pid: int):
+        g = self._gesture
+        if not g or g["pid"] != pid or g["mode"] != "move":
             return
-        new_h = max(120, container._rs_h + (event.y_root - container._rs_y))
-        container.configure(height=new_h)
-        panel["panel_height"] = new_h
-        self.db.update_dm_panel_height(panel["id"], new_h)
-        for p in self._panels:
-            if p["id"] == panel["id"]:
-                p["panel_height"] = new_h
-                break
+        rec = self._items.get(pid)
+        if not rec:
+            return
+        nx = max(0, g["x0"] + (event.x_root - g["mx"]))
+        ny = max(0, g["y0"] + (event.y_root - g["my"]))
+        rec["x"], rec["y"] = int(nx), int(ny)
+        self._canvas.coords(rec["item"], rec["x"], rec["y"])
 
-    # ── Drag and drop ──────────────────────────────────────────────────────────
+    # ── Resize gesture ───────────────────────────────────────────────────────
 
-    def _drag_start(self, event, panel: dict, container: tk.Frame):
-        self._drag_id = panel["id"]
-        self._drag_source_idx = next(
-            (i for i,p in enumerate(self._panels) if p["id"]==panel["id"]), 0)
-        self._drag_offset_x = event.x
-        self._drag_offset_y = event.y
+    def _resize_start(self, event, pid: int, mode: str):
+        rec = self._items.get(pid)
+        if not rec:
+            return
+        self._raise_panel(pid)
+        self._gesture = {
+            "pid": pid, "mode": "resize", "axis": mode,
+            "mx": event.x_root, "my": event.y_root,
+            "w0": rec["w"], "h0": rec["h"],
+        }
 
-        self._drag_ghost = tk.Toplevel(self)
-        self._drag_ghost.overrideredirect(True)
-        self._drag_ghost.attributes("-alpha", 0.75)
-        self._drag_ghost.attributes("-topmost", True)
-        self._drag_ghost.configure(bg=GHOST_BG)
-        tk.Label(self._drag_ghost, text=f"  {panel['title']}  ",
-                 bg=GHOST_BG, fg=TEXT, font=("Segoe UI",12,"bold"),
-                 padx=12, pady=8).pack()
-        self._move_ghost(event)
+    def _resize_motion(self, event, pid: int):
+        g = self._gesture
+        if not g or g["pid"] != pid or g["mode"] != "resize":
+            return
+        rec = self._items.get(pid)
+        if not rec:
+            return
+        axis = g["axis"]
+        new_w, new_h = rec["w"], rec["h"]
+        if "w" in axis:
+            new_w = max(MIN_W, g["w0"] + (event.x_root - g["mx"]))
+        if "h" in axis:
+            new_h = max(MIN_H, g["h0"] + (event.y_root - g["my"]))
+        rec["w"], rec["h"] = int(new_w), int(new_h)
+        self._canvas.itemconfigure(rec["item"], width=rec["w"], height=rec["h"])
 
-    def _drag_motion(self, event):
-        if not self._drag_ghost: return
-        self._move_ghost(event)
-        target = self._find_panel_at(event.x_root, event.y_root)
-        # Highlight inner CTkFrame (first child of each container)
-        for i, c in enumerate(self._panel_widgets):
-            inner = c.winfo_children()[0] if c.winfo_children() else c
-            if i == self._drag_source_idx:
-                inner.configure(fg_color=SURFACE, border_color=BORDER)
-            elif i == target:
-                inner.configure(fg_color=DRAG_HL, border_color=ACCENT)
-            else:
-                inner.configure(fg_color=SURFACE, border_color=BORDER)
-        self._drag_over_idx = target
+    # ── Gesture end (shared) — persist + tidy scrollregion ────────────────────
 
-    def _move_ghost(self, event):
-        x = event.x_root - self._drag_offset_x + 10
-        y = event.y_root - self._drag_offset_y + 10
-        self._drag_ghost.geometry(f"+{x}+{y}")
+    def _gesture_end(self, pid: int):
+        g = self._gesture
+        self._gesture = None
+        rec = self._items.get(pid)
+        if not rec:
+            return
+        self.db.update_dm_panel_geometry(pid, rec["x"], rec["y"], rec["w"], rec["h"])
+        rec["panel"]["pos_x"]     = rec["x"]
+        rec["panel"]["pos_y"]     = rec["y"]
+        rec["panel"]["width_px"]  = rec["w"]
+        rec["panel"]["height_px"] = rec["h"]
+        self._update_scrollregion()
 
-    def _find_panel_at(self, rx, ry) -> int | None:
-        for i, w in enumerate(self._panel_widgets):
-            try:
-                if (w.winfo_rootx() <= rx <= w.winfo_rootx() + w.winfo_width() and
-                        w.winfo_rooty() <= ry <= w.winfo_rooty() + w.winfo_height()):
-                    return i
-            except Exception:
-                pass
-        return None
+    # ── Layouts menu (presets + starters) ─────────────────────────────────────
 
-    def _drag_end(self, event):
-        if self._drag_ghost:
-            self._drag_ghost.destroy()
-            self._drag_ghost = None
+    def _open_layouts_menu(self):
+        if not self._active_tab:
+            messagebox.showinfo("Layouts", "Create a tab first.")
+            return
+        menu = tk.Menu(self, tearoff=0, bg=SURFACE2, fg=TEXT,
+                       activebackground=ACCENT, activeforeground=TEXT, bd=0)
+        menu.add_command(label="Arrange: One Column",
+                         command=lambda: self._apply_columns(1))
+        menu.add_command(label="Arrange: Two Columns",
+                         command=lambda: self._apply_columns(2))
+        menu.add_command(label="Arrange: Three Columns",
+                         command=lambda: self._apply_columns(3))
+        menu.add_separator()
+        menu.add_command(label="✨ Starter: Combat Screen",
+                         command=lambda: self._apply_template("combat"))
+        menu.add_command(label="✨ Starter: Session Prep",
+                         command=lambda: self._apply_template("prep"))
+        # Position near the Layouts button
+        try:
+            x = self.winfo_pointerx()
+            y = self.winfo_pointery()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
-        for c in self._panel_widgets:
-            inner = c.winfo_children()[0] if c.winfo_children() else None
-            if inner:
-                inner.configure(fg_color=SURFACE, border_color=BORDER)
+    def _apply_columns(self, n: int):
+        """Masonry-arrange the current tab's panels into n columns."""
+        if not self._panels:
+            return
+        cw = self._canvas_width()
+        col_w = int((cw - 2 * MARGIN - (n - 1) * GAP) / n)
+        col_w = max(MIN_W, col_w)
+        col_y = [MARGIN] * n
+        for panel in self._panels:
+            c = min(range(n), key=lambda i: col_y[i])
+            x = MARGIN + c * (col_w + GAP)
+            y = col_y[c]
+            h = max(MIN_H, panel.get("height_px", DEF_H))
+            panel["pos_x"], panel["pos_y"] = x, y
+            panel["width_px"], panel["height_px"] = col_w, h
+            self.db.update_dm_panel_geometry(panel["id"], x, y, col_w, h)
+            col_y[c] += h + GAP
+        self._load_panels()
 
-        if self._drag_over_idx is not None and self._drag_over_idx != self._drag_source_idx:
-            panels = list(self._panels)
-            panel = panels.pop(self._drag_source_idx)
-            panels.insert(self._drag_over_idx, panel)
-            self._panels = panels
-            self.db.reorder_dm_panels([p["id"] for p in panels])
-            self._render_panels(self._panels)
-
-        self._drag_id = None
+    def _apply_template(self, name: str):
+        """Append a preset set of panels to the current tab, then arrange."""
+        presets = {
+            "combat": [
+                ("⚔  Initiative",  "initiative"),
+                ("☠  Bestiary",    "bestiary"),
+                ("⚙  Mechanics",   "mechanics"),
+                ("✎  Quick Notes", "notes"),
+            ],
+            "prep": [
+                ("📖  Campaign Info", "campaigns"),
+                ("✎  Quick Notes",   "notes"),
+                ("✦  Magic Items",   "magic_items"),
+                ("⚖  Shops",         "shops"),
+            ],
+        }
+        items = presets.get(name)
+        if not items:
+            return
+        for title, ptype in items:
+            self.db.create_dm_panel(self._active_tab["id"], title, "", 1, ptype,
+                                    pos_x=MARGIN, pos_y=MARGIN,
+                                    width_px=DEF_W, height_px=DEF_H)
+        # Reload then arrange into two columns for a tidy default
+        self._panels = self.db.list_dm_panels(self._active_tab["id"])
+        self._apply_columns(2)
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
