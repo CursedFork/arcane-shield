@@ -14,7 +14,7 @@ def _db_path() -> Path:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
+    conn = sqlite3.connect(_db_path(), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -108,9 +108,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             title TEXT NOT NULL,
             content TEXT NOT NULL DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,
-            width INTEGER NOT NULL DEFAULT 1
+            width INTEGER NOT NULL DEFAULT 1,
+            panel_type TEXT NOT NULL DEFAULT 'text'
         );
     """)
+    # Backfill panel_type column for DBs that predate it
+    try:
+        conn.execute("ALTER TABLE dm_shield_panels ADD COLUMN panel_type TEXT NOT NULL DEFAULT 'text'")
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -446,22 +452,31 @@ class Database:
             (tab_id,)
         ).fetchall())
 
-    def create_dm_panel(self, tab_id: int, title: str, content: str = "", width: int = 1) -> int:
+    def create_dm_panel(self, tab_id: int, title: str, content: str = "",
+                        width: int = 1, panel_type: str = "text") -> int:
         max_order = self.conn.execute(
             "SELECT COALESCE(MAX(sort_order),0) FROM dm_shield_panels WHERE tab_id=?",
             (tab_id,)
         ).fetchone()[0]
         cur = self.conn.execute(
-            "INSERT INTO dm_shield_panels (tab_id,title,content,sort_order,width) VALUES (?,?,?,?,?)",
-            (tab_id, title, content, max_order + 1, width)
+            "INSERT INTO dm_shield_panels (tab_id,title,content,sort_order,width,panel_type) VALUES (?,?,?,?,?,?)",
+            (tab_id, title, content, max_order + 1, width, panel_type)
         )
         self.conn.commit()
         return cur.lastrowid
 
-    def update_dm_panel(self, id: int, title: str, content: str, width: int) -> None:
+    def update_dm_panel(self, id: int, title: str, content: str, width: int,
+                        panel_type: str = "text") -> None:
         self.conn.execute(
-            "UPDATE dm_shield_panels SET title=?, content=?, width=? WHERE id=?",
-            (title, content, width, id)
+            "UPDATE dm_shield_panels SET title=?, content=?, width=?, panel_type=? WHERE id=?",
+            (title, content, width, panel_type, id)
+        )
+        self.conn.commit()
+
+    def update_dm_panel_content(self, id: int, content: str) -> None:
+        """Lightweight update for auto-saving panel state (e.g. initiative JSON)."""
+        self.conn.execute(
+            "UPDATE dm_shield_panels SET content=? WHERE id=?", (content, id)
         )
         self.conn.commit()
 
@@ -475,6 +490,27 @@ class Database:
                 "UPDATE dm_shield_panels SET sort_order=? WHERE id=?", (i, panel_id)
             )
         self.conn.commit()
+
+    # ── Bulk clear ─────────────────────────────────────────────────────────────
+
+    CLEARABLE_TABLES = {
+        "magic_items":  "Magic Items",
+        "bestiary":     "Bestiary",
+        "mechanics":    "Mechanics",
+        "campaigns":    "Campaign Info",
+        "notes":        "Notes",
+        "shops":        "Shops",
+        "party_items":  "Party Loot",
+        "players":      "Party Roster",
+    }
+
+    def clear_table(self, table: str) -> int:
+        """Delete all rows from a clearable table. Returns number of rows deleted."""
+        if table not in self.CLEARABLE_TABLES:
+            raise ValueError(f"Table '{table}' is not clearable.")
+        cur = self.conn.execute(f"DELETE FROM {table}")
+        self.conn.commit()
+        return cur.rowcount
 
     # ── CSV Export ─────────────────────────────────────────────────────────────
 

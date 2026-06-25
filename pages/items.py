@@ -51,6 +51,10 @@ class ItemsPage(ctk.CTkFrame):
                       hover_color=ACCENT_H, text_color=TEXT,
                       font=ctk.CTkFont(size=12),
                       command=self._new_item).grid(row=0, column=1, sticky="e")
+        ctk.CTkButton(hdr, text="Clear All", width=72, height=28,
+                      fg_color="transparent", hover_color=DANGER, text_color=MUTED,
+                      font=ctk.CTkFont(size=12),
+                      command=self._clear_all).grid(row=0, column=2, sticky="e", padx=(4,0))
 
         # Search + filters
         flt = ctk.CTkFrame(left, fg_color="transparent")
@@ -379,6 +383,18 @@ class ItemsPage(ctk.CTkFrame):
     def _delete(self, item: dict):
         if messagebox.askyesno("Delete", f"Delete '{item['name']}'? This cannot be undone."):
             self.db.delete_item(item["id"])
+            self._selected = None
+            self.refresh()
+            self._show_placeholder()
+
+    def _clear_all(self):
+        n = len(self._items)
+        if n == 0:
+            messagebox.showinfo("Clear All", "No magic items to clear.")
+            return
+        if messagebox.askyesno("Clear All Magic Items",
+                               f"Permanently delete all {n} item(s)? This cannot be undone."):
+            self.db.clear_table("magic_items")
             self._selected = None
             self.refresh()
             self._show_placeholder()

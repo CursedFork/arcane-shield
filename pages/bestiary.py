@@ -41,6 +41,10 @@ class BestiaryPage(ctk.CTkFrame):
         ctk.CTkButton(hdr, text="+ New", width=64, height=28, fg_color=ACCENT,
                       hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=12),
                       command=self._new_entry).grid(row=0, column=1, sticky="e")
+        ctk.CTkButton(hdr, text="Clear All", width=72, height=28,
+                      fg_color="transparent", hover_color=DANGER, text_color=MUTED,
+                      font=ctk.CTkFont(size=12),
+                      command=self._clear_all).grid(row=0, column=2, sticky="e", padx=(4,0))
 
         flt = ctk.CTkFrame(left, fg_color="transparent")
         flt.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
@@ -253,6 +257,18 @@ class BestiaryPage(ctk.CTkFrame):
     def _delete(self, entry: dict):
         if messagebox.askyesno("Delete", f"Delete '{entry['name']}'?"):
             self.db.delete_bestiary_entry(entry["id"])
+            self._selected = None
+            self.refresh()
+            self._show_placeholder()
+
+    def _clear_all(self):
+        n = len(self._items)
+        if n == 0:
+            messagebox.showinfo("Clear All", "No bestiary entries to clear.")
+            return
+        if messagebox.askyesno("Clear All Bestiary",
+                               f"Permanently delete all {n} entr(ies)? This cannot be undone."):
+            self.db.clear_table("bestiary")
             self._selected = None
             self.refresh()
             self._show_placeholder()

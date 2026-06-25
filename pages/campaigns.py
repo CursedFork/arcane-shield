@@ -39,6 +39,10 @@ class CampaignsPage(ctk.CTkFrame):
         ctk.CTkButton(hdr, text="+ New", width=64, height=28, fg_color=ACCENT,
                       hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=12),
                       command=self._new).grid(row=0, column=1, sticky="e")
+        ctk.CTkButton(hdr, text="Clear All", width=72, height=28,
+                      fg_color="transparent", hover_color=DANGER, text_color=MUTED,
+                      font=ctk.CTkFont(size=12),
+                      command=self._clear_all).grid(row=0, column=2, sticky="e", padx=(4,0))
 
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self.refresh())
@@ -199,6 +203,17 @@ class CampaignsPage(ctk.CTkFrame):
     def _delete(self, item: dict):
         if messagebox.askyesno("Delete", f"Delete '{item['title']}'?"):
             self.db.delete_campaign(item["id"])
+            self.refresh()
+            self._show_placeholder()
+
+    def _clear_all(self):
+        n = len(self._items)
+        if n == 0:
+            messagebox.showinfo("Clear All", "No campaigns to clear.")
+            return
+        if messagebox.askyesno("Clear All Campaigns",
+                               f"Permanently delete all {n} campaign(s)? This cannot be undone."):
+            self.db.clear_table("campaigns")
             self.refresh()
             self._show_placeholder()
 

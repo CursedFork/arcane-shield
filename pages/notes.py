@@ -34,8 +34,15 @@ class NotesPage(ctk.CTkFrame):
         left.grid_rowconfigure(2, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(left, text="Session Notes", font=ctk.CTkFont(size=15, weight="bold"),
-                     text_color=TEXT).grid(row=0, column=0, sticky="w", padx=12, pady=(12,8))
+        hdr_row = ctk.CTkFrame(left, fg_color="transparent")
+        hdr_row.grid(row=0, column=0, sticky="ew", padx=12, pady=(12,8))
+        hdr_row.columnconfigure(0, weight=1)
+        ctk.CTkLabel(hdr_row, text="Session Notes", font=ctk.CTkFont(size=15, weight="bold"),
+                     text_color=TEXT).grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(hdr_row, text="Clear All", width=72, height=28,
+                      fg_color="transparent", hover_color=DANGER, text_color=MUTED,
+                      font=ctk.CTkFont(size=12),
+                      command=self._clear_all).grid(row=0, column=1, sticky="e")
 
         # Quick-add form
         add_frame = ctk.CTkFrame(left, fg_color=SURFACE2, corner_radius=6)
@@ -229,6 +236,19 @@ class NotesPage(ctk.CTkFrame):
     def _delete(self, note: dict):
         if messagebox.askyesno("Delete", "Delete this note?"):
             self.db.delete_note(note["id"])
+            self._selected = None
+            self.refresh()
+            self._show_placeholder()
+
+    def _clear_all(self):
+        notes = self.db.list_notes()
+        n = len(notes)
+        if n == 0:
+            messagebox.showinfo("Clear All", "No notes to clear.")
+            return
+        if messagebox.askyesno("Clear All Notes",
+                               f"Permanently delete all {n} note(s)? This cannot be undone."):
+            self.db.clear_table("notes")
             self._selected = None
             self.refresh()
             self._show_placeholder()
