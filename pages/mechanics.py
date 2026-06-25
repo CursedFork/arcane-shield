@@ -2,6 +2,7 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, filedialog
+from pages.md_widget import MarkdownText
 
 BG       = "#0f0f13"
 SURFACE  = "#1a1a24"
@@ -128,11 +129,9 @@ class MechanicsPage(ctk.CTkFrame):
                          text_color=MUTED, font=ctk.CTkFont(size=11), anchor="w"
                          ).pack(fill="x", padx=16, pady=(0,8))
 
-        tb = ctk.CTkTextbox(self._right, fg_color=SURFACE2, text_color=TEXT,
-                             border_color=BORDER, font=ctk.CTkFont(size=13), wrap="word")
-        tb.pack(fill="both", expand=True, padx=16, pady=(0,16))
-        tb.insert("1.0", item.get("body_md",""))
-        tb.configure(state="disabled")
+        md = MarkdownText(self._right, bg=SURFACE2)
+        md.pack(fill="both", expand=True, padx=16, pady=(0,16))
+        md.set_markdown(item.get("body_md", ""))
 
     def _new(self):
         self._show_edit({})

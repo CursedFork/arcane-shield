@@ -7,6 +7,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import dice as dice_module
 from datetime import date
+from pages.md_widget import MarkdownText
 
 BG       = "#0f0f13"
 SURFACE  = "#1a1a24"
@@ -504,12 +505,9 @@ class DmShieldPage(ctk.CTkFrame):
                                  font=ctk.CTkFont(size=10)
                                  ).grid(row=0, column=1, padx=(0,6))
                 if m["id"] in expanded and m.get("body_md"):
-                    tb = ctk.CTkTextbox(row, fg_color=SURFACE, text_color=TEXT,
-                                         border_width=0, font=ctk.CTkFont(size=11),
-                                         wrap="word", height=80)
-                    tb.insert("1.0", m["body_md"])
-                    tb.configure(state="disabled")
-                    tb.grid(row=1, column=0, sticky="ew", padx=6, pady=(0,4))
+                    md_w = MarkdownText(row, height=6, bg=SURFACE)
+                    md_w.grid(row=1, column=0, sticky="ew", padx=6, pady=(0,4))
+                    md_w.set_markdown(m["body_md"])
 
                 def toggle(mid=m["id"]):
                     if mid in expanded:
@@ -559,12 +557,9 @@ class DmShieldPage(ctk.CTkFrame):
                 if it["id"] in expanded:
                     desc = it.get("description","") or it.get("mechanical_effect","")
                     if desc:
-                        tb = ctk.CTkTextbox(row, fg_color=SURFACE, text_color=TEXT,
-                                             border_width=0, font=ctk.CTkFont(size=11),
-                                             wrap="word", height=70)
-                        tb.insert("1.0", desc)
-                        tb.configure(state="disabled")
-                        tb.grid(row=1, column=0, columnspan=3, sticky="ew", padx=6, pady=(0,4))
+                        md_w = MarkdownText(row, height=5, bg=SURFACE)
+                        md_w.grid(row=1, column=0, columnspan=3, sticky="ew", padx=6, pady=(0,4))
+                        md_w.set_markdown(desc)
 
                 def toggle(mid=it["id"]):
                     if mid in expanded: expanded.discard(mid)
@@ -605,13 +600,12 @@ class DmShieldPage(ctk.CTkFrame):
                              ).grid(row=0, column=1, padx=(0,6))
 
                 if e["id"] in expanded and e.get("statblock_md"):
-                    tb = ctk.CTkTextbox(row, fg_color=SURFACE, text_color=TEXT,
-                                         border_width=0,
-                                         font=ctk.CTkFont(family="Courier New", size=10),
-                                         wrap="word", height=100)
-                    tb.insert("1.0", e["statblock_md"])
-                    tb.configure(state="disabled")
-                    tb.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(0,4))
+                    md_w = MarkdownText(row, height=7,
+                                        bg=SURFACE,
+                                        font=("Consolas", 10),
+                                        mono=("Consolas", 10))
+                    md_w.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(0,4))
+                    md_w.set_markdown(e["statblock_md"])
 
                 def toggle(eid=e["id"]):
                     if eid in expanded: expanded.discard(eid)
@@ -649,12 +643,9 @@ class DmShieldPage(ctk.CTkFrame):
                              ).grid(row=0, column=0, sticky="ew", padx=6, pady=4)
 
                 if c["id"] in expanded and c.get("body_md"):
-                    tb = ctk.CTkTextbox(row, fg_color=SURFACE, text_color=TEXT,
-                                         border_width=0, font=ctk.CTkFont(size=11),
-                                         wrap="word", height=80)
-                    tb.insert("1.0", c["body_md"])
-                    tb.configure(state="disabled")
-                    tb.grid(row=1, column=0, sticky="ew", padx=6, pady=(0,4))
+                    md_w = MarkdownText(row, height=6, bg=SURFACE)
+                    md_w.grid(row=1, column=0, sticky="ew", padx=6, pady=(0,4))
+                    md_w.set_markdown(c["body_md"])
 
                 def toggle(cid=c["id"]):
                     if cid in expanded: expanded.discard(cid)
