@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 
 interface FileImportResult {
@@ -54,20 +54,21 @@ export default function BulkImport() {
     }
   }, []);
 
-  // Tauri window-level file drop events
+  // Tauri webview-level drag-drop events
   useEffect(() => {
-    const unlisteners: Array<() => void> = [];
+    let unlisten: (() => void) | undefined;
 
-    (async () => {
-      unlisteners.push(await listen("tauri://drag-over",  () => setDragging(true)));
-      unlisteners.push(await listen("tauri://drag-leave", () => setDragging(false)));
-      unlisteners.push(await listen<{ paths: string[] }>("tauri://drag-drop", (e) => {
+    getCurrentWebview().onDragDropEvent((e) => {
+      const { type } = e.payload;
+      if (type === "enter" || type === "over") setDragging(true);
+      if (type === "leave") setDragging(false);
+      if (type === "drop") {
         setDragging(false);
         runImport(e.payload.paths);
-      }));
-    })();
+      }
+    }).then(fn => { unlisten = fn; });
 
-    return () => { unlisteners.forEach(fn => fn()); };
+    return () => { unlisten?.(); };
   }, [runImport]);
 
   async function pickFolder() {
