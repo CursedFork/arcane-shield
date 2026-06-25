@@ -57,9 +57,6 @@ class DmShieldPage(ctk.CTkFrame):
         self._drag_offset_y = 0
         self._panel_widgets: list[ctk.CTkFrame] = []
 
-        # Resize-drag state
-        self._resize_start_y: int = 0
-        self._resize_start_h: int = 0
 
         self._build()
 
@@ -868,22 +865,28 @@ class DmShieldPage(ctk.CTkFrame):
             self._load_panels()
 
     # ── Resize drag ────────────────────────────────────────────────────────────
+    # State is stored on `outer` itself so each panel is independent and
+    # winfo_height() is never used (it returns 1 for unrendered widgets).
 
     def _resize_start(self, event, outer: ctk.CTkFrame, panel: dict):
-        self._resize_start_y = event.y_root
-        self._resize_start_h = outer.winfo_height()
+        outer._rs_start_y = event.y_root
+        outer._rs_start_h = panel.get("panel_height", 260)
 
     def _resize_motion(self, event, outer: ctk.CTkFrame, panel: dict):
-        delta = event.y_root - self._resize_start_y
-        new_h = max(120, self._resize_start_h + delta)
+        if not hasattr(outer, "_rs_start_y"):
+            return
+        delta = event.y_root - outer._rs_start_y
+        new_h = max(120, outer._rs_start_h + delta)
         outer.configure(height=new_h)
 
     def _resize_end(self, event, outer: ctk.CTkFrame, panel: dict):
-        delta = event.y_root - self._resize_start_y
-        new_h = max(120, self._resize_start_h + delta)
+        if not hasattr(outer, "_rs_start_y"):
+            return
+        delta = event.y_root - outer._rs_start_y
+        new_h = max(120, outer._rs_start_h + delta)
         outer.configure(height=new_h)
+        panel["panel_height"] = new_h          # update dict so next drag starts right
         self.db.update_dm_panel_height(panel["id"], new_h)
-        # Update cached panel dict so a re-render preserves the height
         for p in self._panels:
             if p["id"] == panel["id"]:
                 p["panel_height"] = new_h
