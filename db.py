@@ -1,0 +1,602 @@
+"""Database layer — all SQLite access for Arcane Shield."""
+import sqlite3
+import json
+import os
+import csv
+import io
+from pathlib import Path
+
+
+def _db_path() -> Path:
+    data_dir = Path(os.environ.get("APPDATA", Path.home())) / "ArcaneShield"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "arcane-shield.db"
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(_db_path())
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS players (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_name TEXT NOT NULL,
+            character_name TEXT NOT NULL,
+            ac INTEGER NOT NULL DEFAULT 10,
+            max_hp INTEGER NOT NULL DEFAULT 1,
+            initiative_mod INTEGER NOT NULL DEFAULT 0,
+            passive_perception INTEGER NOT NULL DEFAULT 10,
+            notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS magic_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            item_type TEXT NOT NULL DEFAULT '',
+            rarity TEXT NOT NULL DEFAULT 'Common',
+            requires_attunement INTEGER NOT NULL DEFAULT 0,
+            attunement_requirement TEXT,
+            description TEXT NOT NULL DEFAULT '',
+            mechanical_effect TEXT NOT NULL DEFAULT '',
+            charges INTEGER,
+            source_campaign TEXT,
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS bestiary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            ac INTEGER NOT NULL DEFAULT 10,
+            max_hp INTEGER NOT NULL DEFAULT 1,
+            initiative_mod INTEGER NOT NULL DEFAULT 0,
+            cr TEXT NOT NULL DEFAULT '0',
+            statblock_md TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS mechanics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            body_md TEXT NOT NULL DEFAULT '',
+            campaign TEXT,
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS campaigns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            body_md TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_label TEXT NOT NULL,
+            note_date TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS shops (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shop_name TEXT NOT NULL,
+            item_name TEXT NOT NULL,
+            price TEXT NOT NULL DEFAULT '',
+            quantity INTEGER NOT NULL DEFAULT 1,
+            notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS party_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_name TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS saved_encounters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            state_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
+
+def _rows(rs) -> list[dict]:
+    return [dict(r) for r in rs]
+
+
+def _tags_in(row: dict) -> dict:
+    if "tags" in row:
+        row["tags"] = json.loads(row["tags"] or "[]")
+    return row
+
+
+def _tag_list(tags) -> list[str]:
+    if isinstance(tags, list):
+        return tags
+    if isinstance(tags, str):
+        return [t.strip() for t in tags.split(";") if t.strip()]
+    return []
+
+
+class Database:
+    def __init__(self):
+        self.conn = _connect()
+        _migrate(self.conn)
+
+    # ── Players ────────────────────────────────────────────────────────────────
+
+    def list_players(self) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM players ORDER BY character_name"
+        ).fetchall())
+
+    def create_player(self, d: dict) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO players (player_name, character_name, ac, max_hp, initiative_mod, passive_perception, notes) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (d["player_name"], d["character_name"], int(d.get("ac", 10)),
+             int(d.get("max_hp", 1)), int(d.get("initiative_mod", 0)),
+             int(d.get("passive_perception", 10)), d.get("notes") or None)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_player(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE players SET player_name=?, character_name=?, ac=?, max_hp=?, "
+            "initiative_mod=?, passive_perception=?, notes=? WHERE id=?",
+            (d["player_name"], d["character_name"], int(d.get("ac", 10)),
+             int(d.get("max_hp", 1)), int(d.get("initiative_mod", 0)),
+             int(d.get("passive_perception", 10)), d.get("notes") or None, id)
+        )
+        self.conn.commit()
+
+    def delete_player(self, id: int) -> None:
+        self.conn.execute("DELETE FROM players WHERE id=?", (id,))
+        self.conn.commit()
+
+    # ── Magic Items ────────────────────────────────────────────────────────────
+
+    def list_items(self, search="", item_type="", rarity="") -> list[dict]:
+        q = "SELECT * FROM magic_items WHERE 1=1"
+        p: list = []
+        if search:
+            q += " AND (name LIKE ? OR description LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        if item_type:
+            q += " AND item_type=?"; p.append(item_type)
+        if rarity:
+            q += " AND rarity=?"; p.append(rarity)
+        q += " ORDER BY name"
+        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+
+    def create_item(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO magic_items (name,item_type,rarity,requires_attunement,attunement_requirement,"
+            "description,mechanical_effect,charges,source_campaign,tags) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (d["name"], d.get("item_type",""), d.get("rarity","Common"),
+             1 if d.get("requires_attunement") else 0, d.get("attunement_requirement") or None,
+             d.get("description",""), d.get("mechanical_effect",""),
+             d.get("charges") or None, d.get("source_campaign") or None, tags)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_item(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE magic_items SET name=?,item_type=?,rarity=?,requires_attunement=?,"
+            "attunement_requirement=?,description=?,mechanical_effect=?,charges=?,source_campaign=?,tags=? WHERE id=?",
+            (d["name"], d.get("item_type",""), d.get("rarity","Common"),
+             1 if d.get("requires_attunement") else 0, d.get("attunement_requirement") or None,
+             d.get("description",""), d.get("mechanical_effect",""),
+             d.get("charges") or None, d.get("source_campaign") or None, tags, id)
+        )
+        self.conn.commit()
+
+    def delete_item(self, id: int) -> None:
+        self.conn.execute("DELETE FROM magic_items WHERE id=?", (id,)); self.conn.commit()
+
+    def item_types(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT item_type FROM magic_items WHERE item_type!='' ORDER BY item_type"
+        ).fetchall()]
+
+    # ── Bestiary ───────────────────────────────────────────────────────────────
+
+    def list_bestiary(self, search="", cr="") -> list[dict]:
+        q = "SELECT * FROM bestiary WHERE 1=1"; p: list = []
+        if search:
+            q += " AND name LIKE ?"; p.append(f"%{search}%")
+        if cr:
+            q += " AND cr=?"; p.append(cr)
+        q += " ORDER BY name"
+        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+
+    def create_bestiary_entry(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO bestiary (name,ac,max_hp,initiative_mod,cr,statblock_md,tags) VALUES (?,?,?,?,?,?,?)",
+            (d["name"], int(d.get("ac",10)), int(d.get("max_hp",1)),
+             int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_bestiary_entry(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE bestiary SET name=?,ac=?,max_hp=?,initiative_mod=?,cr=?,statblock_md=?,tags=? WHERE id=?",
+            (d["name"], int(d.get("ac",10)), int(d.get("max_hp",1)),
+             int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags, id)
+        )
+        self.conn.commit()
+
+    def delete_bestiary_entry(self, id: int) -> None:
+        self.conn.execute("DELETE FROM bestiary WHERE id=?", (id,)); self.conn.commit()
+
+    def bestiary_crs(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT cr FROM bestiary ORDER BY CAST(cr AS REAL)"
+        ).fetchall()]
+
+    # ── Mechanics ──────────────────────────────────────────────────────────────
+
+    def list_mechanics(self, search="") -> list[dict]:
+        q = "SELECT * FROM mechanics WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (title LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        q += " ORDER BY title"
+        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+
+    def create_mechanic(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO mechanics (title,body_md,campaign,tags) VALUES (?,?,?,?)",
+            (d["title"], d.get("body_md",""), d.get("campaign") or None, tags)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_mechanic(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE mechanics SET title=?,body_md=?,campaign=?,tags=? WHERE id=?",
+            (d["title"], d.get("body_md",""), d.get("campaign") or None, tags, id)
+        )
+        self.conn.commit()
+
+    def delete_mechanic(self, id: int) -> None:
+        self.conn.execute("DELETE FROM mechanics WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Campaigns ──────────────────────────────────────────────────────────────
+
+    def list_campaigns(self, search="") -> list[dict]:
+        q = "SELECT * FROM campaigns WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (title LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        q += " ORDER BY title"
+        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+
+    def create_campaign(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO campaigns (title,body_md,tags) VALUES (?,?,?)",
+            (d["title"], d.get("body_md",""), tags)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_campaign(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE campaigns SET title=?,body_md=?,tags=? WHERE id=?",
+            (d["title"], d.get("body_md",""), tags, id)
+        )
+        self.conn.commit()
+
+    def delete_campaign(self, id: int) -> None:
+        self.conn.execute("DELETE FROM campaigns WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Notes ──────────────────────────────────────────────────────────────────
+
+    def list_notes(self) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM notes ORDER BY session_label DESC, note_date DESC, id DESC"
+        ).fetchall())
+
+    def create_note(self, d: dict) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO notes (session_label,note_date,body) VALUES (?,?,?)",
+            (d["session_label"], d["note_date"], d["body"])
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_note(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE notes SET session_label=?,note_date=?,body=? WHERE id=?",
+            (d["session_label"], d["note_date"], d["body"], id)
+        )
+        self.conn.commit()
+
+    def delete_note(self, id: int) -> None:
+        self.conn.execute("DELETE FROM notes WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Shops ──────────────────────────────────────────────────────────────────
+
+    def list_shop_items(self) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM shops ORDER BY shop_name, item_name"
+        ).fetchall())
+
+    def create_shop_item(self, d: dict) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO shops (shop_name,item_name,price,quantity,notes) VALUES (?,?,?,?,?)",
+            (d["shop_name"], d["item_name"], d.get("price",""), int(d.get("quantity",1)), d.get("notes") or None)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_shop_item(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE shops SET shop_name=?,item_name=?,price=?,quantity=?,notes=? WHERE id=?",
+            (d["shop_name"], d["item_name"], d.get("price",""), int(d.get("quantity",1)), d.get("notes") or None, id)
+        )
+        self.conn.commit()
+
+    def delete_shop_item(self, id: int) -> None:
+        self.conn.execute("DELETE FROM shops WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Party Items ────────────────────────────────────────────────────────────
+
+    def list_party_items(self) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM party_items ORDER BY owner, item_name"
+        ).fetchall())
+
+    def create_party_item(self, d: dict) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO party_items (item_name,owner,quantity,notes) VALUES (?,?,?,?)",
+            (d["item_name"], d["owner"], int(d.get("quantity",1)), d.get("notes") or None)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_party_item(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE party_items SET item_name=?,owner=?,quantity=?,notes=? WHERE id=?",
+            (d["item_name"], d["owner"], int(d.get("quantity",1)), d.get("notes") or None, id)
+        )
+        self.conn.commit()
+
+    def delete_party_item(self, id: int) -> None:
+        self.conn.execute("DELETE FROM party_items WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Saved Encounters ───────────────────────────────────────────────────────
+
+    def list_saved_encounters(self) -> list[dict]:
+        return _rows(self.conn.execute(
+            "SELECT * FROM saved_encounters ORDER BY updated_at DESC"
+        ).fetchall())
+
+    def save_encounter(self, name: str, state_json: str) -> None:
+        self.conn.execute(
+            "INSERT INTO saved_encounters (name,state_json,updated_at) VALUES (?,?,datetime('now')) "
+            "ON CONFLICT(name) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at",
+            (name, state_json)
+        )
+        self.conn.commit()
+
+    def delete_saved_encounter(self, id: int) -> None:
+        self.conn.execute("DELETE FROM saved_encounters WHERE id=?", (id,)); self.conn.commit()
+
+    # ── CSV Export ─────────────────────────────────────────────────────────────
+
+    def export_csv(self, table: str) -> str:
+        out = io.StringIO()
+        w = csv.writer(out)
+
+        if table == "players":
+            w.writerow(["player_name","character_name","ac","max_hp","initiative_mod","passive_perception","notes"])
+            for r in self.conn.execute("SELECT player_name,character_name,ac,max_hp,initiative_mod,passive_perception,notes FROM players").fetchall():
+                w.writerow(list(r))
+
+        elif table == "magic_items":
+            w.writerow(["name","item_type","rarity","requires_attunement","attunement_requirement","description","mechanical_effect","charges","source_campaign","tags"])
+            for r in self.conn.execute("SELECT name,item_type,rarity,requires_attunement,attunement_requirement,description,mechanical_effect,charges,source_campaign,tags FROM magic_items").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
+        elif table == "bestiary":
+            w.writerow(["name","ac","max_hp","initiative_mod","cr","statblock_md","tags"])
+            for r in self.conn.execute("SELECT name,ac,max_hp,initiative_mod,cr,statblock_md,tags FROM bestiary").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
+        elif table == "mechanics":
+            w.writerow(["title","body_md","campaign","tags"])
+            for r in self.conn.execute("SELECT title,body_md,campaign,tags FROM mechanics").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
+        elif table == "campaigns":
+            w.writerow(["title","body_md","tags"])
+            for r in self.conn.execute("SELECT title,body_md,tags FROM campaigns").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
+        elif table == "notes":
+            w.writerow(["session_label","note_date","body"])
+            for r in self.conn.execute("SELECT session_label,note_date,body FROM notes").fetchall():
+                w.writerow(list(r))
+
+        elif table == "shops":
+            w.writerow(["shop_name","item_name","price","quantity","notes"])
+            for r in self.conn.execute("SELECT shop_name,item_name,price,quantity,notes FROM shops").fetchall():
+                w.writerow(list(r))
+
+        elif table == "party_items":
+            w.writerow(["item_name","owner","quantity","notes"])
+            for r in self.conn.execute("SELECT item_name,owner,quantity,notes FROM party_items").fetchall():
+                w.writerow(list(r))
+
+        return out.getvalue()
+
+    # ── CSV Import ─────────────────────────────────────────────────────────────
+
+    def import_csv(self, filename: str, text: str) -> dict:
+        """Auto-detect table from headers/filename and import rows."""
+        try:
+            reader = csv.DictReader(io.StringIO(text))
+            headers = set(reader.fieldnames or [])
+        except Exception as e:
+            return {"table": "unknown", "inserted": 0, "skipped": 0, "errors": [str(e)]}
+
+        table = _detect_table(headers, filename)
+        if not table:
+            return {"table": "unknown", "inserted": 0, "skipped": 0,
+                    "errors": [f"Cannot detect table from headers: {headers}"]}
+
+        inserted = 0; skipped = 0; errors: list[str] = []
+        reader = csv.DictReader(io.StringIO(text))
+        for i, row in enumerate(reader, start=2):
+            try:
+                row = {k: (v.strip() if v else v) for k, v in row.items()}
+                if table == "players":
+                    if not row.get("player_name") or not row.get("character_name"):
+                        skipped += 1; continue
+                    self.create_player({
+                        "player_name": row["player_name"],
+                        "character_name": row["character_name"],
+                        "ac": _int(row.get("ac"), 10),
+                        "max_hp": _int(row.get("max_hp"), 1),
+                        "initiative_mod": _int(row.get("initiative_mod"), 0),
+                        "passive_perception": _int(row.get("passive_perception"), 10),
+                        "notes": row.get("notes"),
+                    })
+                elif table == "magic_items":
+                    if not row.get("name"): skipped += 1; continue
+                    self.create_item({
+                        "name": row["name"],
+                        "item_type": row.get("item_type",""),
+                        "rarity": row.get("rarity","Common"),
+                        "requires_attunement": row.get("requires_attunement","").lower() in ("1","true","yes"),
+                        "attunement_requirement": row.get("attunement_requirement"),
+                        "description": row.get("description",""),
+                        "mechanical_effect": row.get("mechanical_effect",""),
+                        "charges": _int(row.get("charges"), None),
+                        "source_campaign": row.get("source_campaign"),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
+                elif table == "bestiary":
+                    if not row.get("name"): skipped += 1; continue
+                    self.create_bestiary_entry({
+                        "name": row["name"],
+                        "ac": _int(row.get("ac"), 10),
+                        "max_hp": _int(row.get("max_hp"), 1),
+                        "initiative_mod": _int(row.get("initiative_mod"), 0),
+                        "cr": row.get("cr","0"),
+                        "statblock_md": row.get("statblock_md",""),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
+                elif table == "mechanics":
+                    if not row.get("title"): skipped += 1; continue
+                    self.create_mechanic({
+                        "title": row["title"],
+                        "body_md": row.get("body_md",""),
+                        "campaign": row.get("campaign"),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
+                elif table == "campaigns":
+                    if not row.get("title"): skipped += 1; continue
+                    self.create_campaign({
+                        "title": row["title"],
+                        "body_md": row.get("body_md",""),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
+                elif table == "notes":
+                    if not row.get("session_label"): skipped += 1; continue
+                    self.create_note({
+                        "session_label": row["session_label"],
+                        "note_date": row.get("note_date",""),
+                        "body": row.get("body",""),
+                    })
+                elif table == "shops":
+                    if not row.get("shop_name") or not row.get("item_name"): skipped += 1; continue
+                    self.create_shop_item({
+                        "shop_name": row["shop_name"],
+                        "item_name": row["item_name"],
+                        "price": row.get("price",""),
+                        "quantity": _int(row.get("quantity"), 1),
+                        "notes": row.get("notes"),
+                    })
+                elif table == "party_items":
+                    if not row.get("item_name"): skipped += 1; continue
+                    self.create_party_item({
+                        "item_name": row["item_name"],
+                        "owner": row.get("owner",""),
+                        "quantity": _int(row.get("quantity"), 1),
+                        "notes": row.get("notes"),
+                    })
+                inserted += 1
+            except Exception as e:
+                errors.append(f"Row {i}: {e}")
+        return {"table": table, "inserted": inserted, "skipped": skipped, "errors": errors}
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _int(v, default):
+    try:
+        return int(v) if v not in (None, "", "None") else default
+    except (ValueError, TypeError):
+        return default
+
+
+def _detect_table(headers: set, filename: str) -> str | None:
+    h = {c.lower() for c in headers}
+
+    # Header-based detection (most reliable)
+    if "player_name" in h and "character_name" in h:
+        return "players"
+    if "shop_name" in h and "item_name" in h:
+        return "shops"
+    if "item_name" in h and "owner" in h:
+        return "party_items"
+    if "session_label" in h and "note_date" in h:
+        return "notes"
+    if "item_type" in h and "rarity" in h:
+        return "magic_items"
+    if any("statblock" in c for c in h) or ("initiative_mod" in h and "cr" in h):
+        return "bestiary"
+    if "body_md" in h and "campaign" in h:
+        return "mechanics"
+    if "body_md" in h:
+        return "campaigns"
+
+    # Filename fallback
+    fn = filename.lower()
+    if any(x in fn for x in ("player", "roster")):
+        return "players"
+    if any(x in fn for x in ("party_item", "loot", "inventory")):
+        return "party_items"
+    if any(x in fn for x in ("magic", "item")):
+        return "magic_items"
+    if any(x in fn for x in ("bestiar", "monster", "creature")):
+        return "bestiary"
+    if any(x in fn for x in ("mechanic", "rule")):
+        return "mechanics"
+    if any(x in fn for x in ("campaign", "world")):
+        return "campaigns"
+    if any(x in fn for x in ("note", "session")):
+        return "notes"
+    if any(x in fn for x in ("shop", "vendor", "store")):
+        return "shops"
+
+    return None

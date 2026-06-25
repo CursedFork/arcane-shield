@@ -1,25 +1,7 @@
-# Rust / Tauri build output
-src-tauri/target/
-
-# Node
-node_modules/
-dist/
-
-# Vite
-.vite/
-
-# Environment / secrets
+__pycache__/
+*.pyc
+*.pyo
 .env
-.env.*
-!.env.example
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
-.idea/
-
-# Logs
-*.log
+*.db
+*.db-shm
+*.db-wal
