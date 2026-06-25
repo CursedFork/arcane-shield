@@ -130,10 +130,10 @@ class _ShopsTab(ctk.CTkFrame):
         header = ctk.CTkFrame(self, fg_color=SURFACE2, height=30, corner_radius=4)
         header.grid(row=1, column=0, sticky="new")
         for col, (label, w) in enumerate([
-            ("Shop", 160), ("Item", 200), ("Price", 80), ("Qty", 50), ("Notes", 0), ("", 70)
+            ("Shop", 160), ("Item", 200), ("Price", 80), ("Qty", 50), ("Notes", 100), ("", 70)
         ]):
             ctk.CTkLabel(header, text=label, text_color=MUTED,
-                         font=ctk.CTkFont(size=11), anchor="w", width=w if w else None
+                         font=ctk.CTkFont(size=11), anchor="w", width=w
                          ).pack(side="left" if col < 5 else "right", padx=(8 if col==0 else 4,4))
 
         # Rows
