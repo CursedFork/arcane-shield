@@ -2,6 +2,8 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, filedialog
+from pages.md_widget import MarkdownText
+from pages.ui_util import bind_row, ScrollList
 
 BG       = "#0f0f13"
 SURFACE  = "#1a1a24"
@@ -28,7 +30,13 @@ class ItemsPage(ctk.CTkFrame):
         self._items: list[dict] = []
         self._selected: dict | None = None
         self._editing = False
+        self._debounce_id = None
         self._build()
+
+    def _debounce(self, fn, ms=160):
+        if self._debounce_id is not None:
+            self.after_cancel(self._debounce_id)
+        self._debounce_id = self.after(ms, fn)
 
     def _build(self):
         self.grid_columnconfigure(1, weight=1)
@@ -62,7 +70,7 @@ class ItemsPage(ctk.CTkFrame):
         flt.columnconfigure(0, weight=1)
 
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", lambda *_: self._apply_filters())
+        self._search_var.trace_add("write", lambda *_: self._debounce(self._apply_filters))
         ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
                      height=30).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0,4))
@@ -106,10 +114,8 @@ class ItemsPage(ctk.CTkFrame):
         self._tag_cb.grid(row=2, column=1, sticky="ew", padx=(3,0), pady=(4,0))
 
         # Item list
-        self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
-                                                   scrollbar_button_color=ACCENT)
+        self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
-        self._list_frame.columnconfigure(0, weight=1)
 
         # Export button
         ctk.CTkButton(left, text="Export CSV", height=28, fg_color=SURFACE2,
@@ -125,34 +131,30 @@ class ItemsPage(ctk.CTkFrame):
 
     # ── List rendering ─────────────────────────────────────────────────────────
 
-    RENDER_CAP = 300
+    RENDER_CAP = 150
 
     def _render_list(self, items: list[dict]):
-        for w in self._list_frame.winfo_children():
-            w.destroy()
+        # Plain tk rows in a ScrollList keep filter/search rebuilds instant.
+        body = self._list_frame.body
+        self._list_frame.clear()
         for item in items[:self.RENDER_CAP]:
-            color = RARITY_COLORS.get(item.get("rarity", "Common"), MUTED)
-            row = ctk.CTkFrame(self._list_frame, fg_color="transparent", corner_radius=4,
-                                cursor="hand2")
+            color = RARITY_COLORS.get(item.get("rarity", "Common"), TEXT)
+            row = tk.Frame(body, bg=SURFACE, cursor="hand2")
             row.pack(fill="x", padx=2, pady=1)
-            row.columnconfigure(1, weight=1)
-            # Rarity dot
-            ctk.CTkLabel(row, text="●", text_color=color,
-                         font=ctk.CTkFont(size=10), width=14).grid(row=0, column=0, padx=(4,2))
-            ctk.CTkLabel(row, text=item["name"], anchor="w",
-                         text_color=TEXT, font=ctk.CTkFont(size=13),
-                         wraplength=200).grid(row=0, column=1, sticky="ew", pady=5)
-            ctk.CTkLabel(row, text=item.get("item_type",""), anchor="e",
-                         text_color=MUTED, font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=(0,6))
-            row.bind("<Button-1>", lambda e, it=item: self._select(it))
-            for child in row.winfo_children():
-                child.bind("<Button-1>", lambda e, it=item: self._select(it))
+            tk.Label(row, text=item.get("item_type", ""), anchor="e", bg=SURFACE,
+                     fg=MUTED, font=("Segoe UI", 8)).pack(side="right", padx=6)
+            # Name colored by rarity (classic D&D convention)
+            tk.Label(row, text=item["name"], anchor="w", bg=SURFACE, fg=color,
+                     font=("Segoe UI", 11)).pack(side="left", fill="x", expand=True,
+                                                 padx=8, pady=4)
+            bind_row(row, lambda it=item: self._select(it), SURFACE, SURFACE2)
         if len(items) > self.RENDER_CAP:
-            ctk.CTkLabel(self._list_frame,
-                         text=f"Showing {self.RENDER_CAP} of {len(items)} — "
-                              f"use Search or the filters to narrow results.",
-                         text_color=MUTED, font=ctk.CTkFont(size=11), wraplength=240
-                         ).pack(fill="x", padx=8, pady=8)
+            tk.Label(body,
+                     text=f"Showing {self.RENDER_CAP} of {len(items)} — "
+                          f"narrow with Search or the filters.",
+                     bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=240
+                     ).pack(fill="x", padx=8, pady=8)
+        self._list_frame.finalize()
 
     def _apply_filters(self):
         search = self._search_var.get().strip()
@@ -253,21 +255,17 @@ class ItemsPage(ctk.CTkFrame):
             ctk.CTkLabel(body, text="Description", text_color=MUTED,
                          font=ctk.CTkFont(size=12, weight="bold")).grid(
                 row=r, column=0, columnspan=2, sticky="w", padx=8, pady=(8,2)); r+=1
-            tb = ctk.CTkTextbox(body, height=100, fg_color=SURFACE2, text_color=TEXT,
-                                 border_color=BORDER, font=ctk.CTkFont(size=12), wrap="word")
-            tb.insert("1.0", item["description"])
-            tb.configure(state="disabled")
-            tb.grid(row=r, column=0, columnspan=2, sticky="ew", padx=8, pady=(0,6)); r+=1
+            md = MarkdownText(body, height=6, bg=SURFACE2)
+            md.set_markdown(item["description"])
+            md.grid(row=r, column=0, columnspan=2, sticky="ew", padx=8, pady=(0,6)); r+=1
 
         if item.get("mechanical_effect"):
             ctk.CTkLabel(body, text="Mechanical Effect", text_color=MUTED,
                          font=ctk.CTkFont(size=12, weight="bold")).grid(
                 row=r, column=0, columnspan=2, sticky="w", padx=8, pady=(8,2)); r+=1
-            tb2 = ctk.CTkTextbox(body, height=120, fg_color=SURFACE2, text_color=TEXT,
-                                  border_color=BORDER, font=ctk.CTkFont(size=12), wrap="word")
-            tb2.insert("1.0", item["mechanical_effect"])
-            tb2.configure(state="disabled")
-            tb2.grid(row=r, column=0, columnspan=2, sticky="ew", padx=8, pady=(0,8)); r+=1
+            md2 = MarkdownText(body, height=7, bg=SURFACE2)
+            md2.set_markdown(item["mechanical_effect"])
+            md2.grid(row=r, column=0, columnspan=2, sticky="ew", padx=8, pady=(0,8)); r+=1
 
     # ── Edit form ──────────────────────────────────────────────────────────────
 

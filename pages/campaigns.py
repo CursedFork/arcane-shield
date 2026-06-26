@@ -2,6 +2,8 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, filedialog
+from pages.md_widget import MarkdownText
+from pages.ui_util import bind_row, ScrollList
 
 BG       = "#0f0f13"
 SURFACE  = "#1a1a24"
@@ -19,7 +21,13 @@ class CampaignsPage(ctk.CTkFrame):
         super().__init__(parent, fg_color=BG)
         self.db = db
         self._items: list[dict] = []
+        self._debounce_id = None
         self._build()
+
+    def _debounce(self, fn, ms=160):
+        if self._debounce_id is not None:
+            self.after_cancel(self._debounce_id)
+        self._debounce_id = self.after(ms, fn)
 
     def _build(self):
         self.grid_columnconfigure(1, weight=1)
@@ -49,7 +57,7 @@ class CampaignsPage(ctk.CTkFrame):
         flt.columnconfigure(0, weight=1)
 
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", lambda *_: self.refresh())
+        self._search_var.trace_add("write", lambda *_: self._debounce(self._apply_filters))
         ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=30
                      ).grid(row=0, column=0, sticky="ew", pady=(0,4))
@@ -60,13 +68,11 @@ class CampaignsPage(ctk.CTkFrame):
                                        button_color=ACCENT, text_color=TEXT,
                                        dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
                                        height=28, font=ctk.CTkFont(size=12),
-                                       command=lambda _: self.refresh())
+                                       command=lambda _: self._apply_filters())
         self._tag_cb.grid(row=1, column=0, sticky="ew")
 
-        self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
-                                                   scrollbar_button_color=ACCENT)
+        self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
-        self._list_frame.columnconfigure(0, weight=1)
 
         ctk.CTkButton(left, text="Export CSV", height=28, fg_color=SURFACE2,
                       hover_color=BORDER, text_color=MUTED, font=ctk.CTkFont(size=11),
@@ -78,21 +84,31 @@ class CampaignsPage(ctk.CTkFrame):
         self._right.grid_rowconfigure(1, weight=1)
         self._show_placeholder()
 
+    RENDER_CAP = 150
+
     def _render_list(self):
-        for w in self._list_frame.winfo_children():
-            w.destroy()
-        for item in self._items:
-            row = ctk.CTkFrame(self._list_frame, fg_color="transparent", cursor="hand2")
+        body = self._list_frame.body
+        self._list_frame.clear()
+        for item in self._items[:self.RENDER_CAP]:
+            row = tk.Frame(body, bg=SURFACE, cursor="hand2")
             row.pack(fill="x", padx=2, pady=1)
-            row.columnconfigure(0, weight=1)
-            ctk.CTkLabel(row, text=item["title"], anchor="w", text_color=TEXT,
-                         font=ctk.CTkFont(size=13)).grid(row=0, column=0, sticky="ew", padx=8, pady=6)
-            row.bind("<Button-1>", lambda e, it=item: self._select(it))
-            for c in row.winfo_children():
-                c.bind("<Button-1>", lambda e, it=item: self._select(it))
+            tk.Label(row, text=item["title"], anchor="w", bg=SURFACE, fg=TEXT,
+                     font=("Segoe UI", 11)).pack(side="left", fill="x", expand=True,
+                                                 padx=8, pady=6)
+            bind_row(row, lambda it=item: self._select(it), SURFACE, SURFACE2)
+        if len(self._items) > self.RENDER_CAP:
+            tk.Label(body,
+                     text=f"Showing {self.RENDER_CAP} of {len(self._items)} — "
+                          f"narrow with Search or the filter.",
+                     bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=240
+                     ).pack(fill="x", padx=8, pady=8)
+        self._list_frame.finalize()
 
     def refresh(self):
         self._tag_cb.configure(values=["All Tags"] + self.db.campaign_tags())
+        self._apply_filters()
+
+    def _apply_filters(self):
         tag = self._tag_var.get()
         self._items = self.db.list_campaigns(
             search=self._search_var.get().strip(),
@@ -138,11 +154,9 @@ class CampaignsPage(ctk.CTkFrame):
                          text_color=MUTED, font=ctk.CTkFont(size=11), anchor="w"
                          ).pack(fill="x", padx=16, pady=(0,8))
 
-        tb = ctk.CTkTextbox(self._right, fg_color=SURFACE2, text_color=TEXT,
-                             border_color=BORDER, font=ctk.CTkFont(size=13), wrap="word")
-        tb.pack(fill="both", expand=True, padx=16, pady=(0,16))
-        tb.insert("1.0", item.get("body_md",""))
-        tb.configure(state="disabled")
+        md = MarkdownText(self._right, bg=SURFACE2)
+        md.pack(fill="both", expand=True, padx=16, pady=(0,16))
+        md.set_markdown(item.get("body_md",""))
 
     def _new(self):
         self._show_edit({})

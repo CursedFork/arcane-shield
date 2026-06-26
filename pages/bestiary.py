@@ -2,6 +2,8 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, filedialog
+from pages.md_widget import MarkdownText
+from pages.ui_util import bind_row, ScrollList
 
 BG       = "#0f0f13"
 SURFACE  = "#1a1a24"
@@ -20,7 +22,13 @@ class BestiaryPage(ctk.CTkFrame):
         self.db = db
         self._entries: list[dict] = []
         self._selected: dict | None = None
+        self._debounce_id = None
         self._build()
+
+    def _debounce(self, fn, ms=160):
+        if self._debounce_id is not None:
+            self.after_cancel(self._debounce_id)
+        self._debounce_id = self.after(ms, fn)
 
     def _build(self):
         self.grid_columnconfigure(1, weight=1)
@@ -51,7 +59,7 @@ class BestiaryPage(ctk.CTkFrame):
         flt.columnconfigure((0, 1), weight=1)
 
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", lambda *_: self._apply_filters())
+        self._search_var.trace_add("write", lambda *_: self._debounce(self._apply_filters))
         ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
                      height=30).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0,4))
@@ -74,10 +82,8 @@ class BestiaryPage(ctk.CTkFrame):
                                         command=lambda _: self._apply_filters())
         self._type_cb.grid(row=1, column=1, sticky="ew", padx=(3,0))
 
-        self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
-                                                   scrollbar_button_color=ACCENT)
+        self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
-        self._list_frame.columnconfigure(0, weight=1)
 
         ctk.CTkButton(left, text="Export CSV", height=28, fg_color=SURFACE2,
                       hover_color=BORDER, text_color=MUTED, font=ctk.CTkFont(size=11),
@@ -90,32 +96,30 @@ class BestiaryPage(ctk.CTkFrame):
         self._right.grid_rowconfigure(1, weight=1)
         self._show_placeholder()
 
-    RENDER_CAP = 300
+    RENDER_CAP = 150
 
     def _render_list(self, entries: list[dict]):
-        for w in self._list_frame.winfo_children():
-            w.destroy()
-        shown = entries[:self.RENDER_CAP]
-        for e in shown:
-            row = ctk.CTkFrame(self._list_frame, fg_color="transparent", cursor="hand2")
+        # Plain tk rows in a ScrollList, kept to 2 widgets each — list rebuilds
+        # (filtering/searching) feel instant even with thousands of records.
+        body = self._list_frame.body
+        self._list_frame.clear()
+        for e in entries[:self.RENDER_CAP]:
+            row = tk.Frame(body, bg=SURFACE, cursor="hand2")
             row.pack(fill="x", padx=2, pady=1)
-            row.columnconfigure(0, weight=1)
-            ctk.CTkLabel(row, text=e["name"], anchor="w", text_color=TEXT,
-                         font=ctk.CTkFont(size=13)).grid(row=0, column=0, sticky="ew", padx=8, pady=5)
-            ctk.CTkLabel(row, text=f"CR {e.get('cr','?')}", anchor="e",
-                         text_color=MUTED, font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=(0,8))
-            ctk.CTkLabel(row, text=f"AC {e.get('ac','?')} · {e.get('max_hp','?')} HP",
-                         anchor="e", text_color=MUTED, font=ctk.CTkFont(size=10)
-                         ).grid(row=1, column=0, columnspan=2, sticky="e", padx=8, pady=(0,4))
-            row.bind("<Button-1>", lambda ev, en=e: self._select(en))
-            for c in row.winfo_children():
-                c.bind("<Button-1>", lambda ev, en=e: self._select(en))
+            tk.Label(row, text=f"CR {e.get('cr','?')} · AC {e.get('ac','?')} · {e.get('max_hp','?')}HP",
+                     anchor="e", bg=SURFACE, fg=MUTED, font=("Segoe UI", 8)
+                     ).pack(side="right", padx=8)
+            tk.Label(row, text=e["name"], anchor="w", bg=SURFACE, fg=TEXT,
+                     font=("Segoe UI", 11)).pack(side="left", fill="x", expand=True,
+                                                 padx=8, pady=4)
+            bind_row(row, lambda en=e: self._select(en), SURFACE, SURFACE2)
         if len(entries) > self.RENDER_CAP:
-            ctk.CTkLabel(self._list_frame,
-                         text=f"Showing {self.RENDER_CAP} of {len(entries)} — "
-                              f"use Search or the filters to narrow results.",
-                         text_color=MUTED, font=ctk.CTkFont(size=11), wraplength=240
-                         ).pack(fill="x", padx=8, pady=8)
+            tk.Label(body,
+                     text=f"Showing {self.RENDER_CAP} of {len(entries)} — "
+                          f"narrow with Search or the filters.",
+                     bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=240
+                     ).pack(fill="x", padx=8, pady=8)
+        self._list_frame.finalize()
 
     def _apply_filters(self):
         search = self._search_var.get().strip()
@@ -178,13 +182,10 @@ class BestiaryPage(ctk.CTkFrame):
                          text_color=MUTED, font=ctk.CTkFont(size=11), anchor="w"
                          ).pack(fill="x", padx=16, pady=(0,8))
 
-        # Statblock in monospace textbox
-        tb = ctk.CTkTextbox(self._right, fg_color=SURFACE2, text_color=TEXT,
-                             border_color=BORDER, font=ctk.CTkFont(family="Courier New", size=12),
-                             wrap="word")
-        tb.pack(fill="both", expand=True, padx=16, pady=(0,16))
-        tb.insert("1.0", entry.get("statblock_md","(no statblock)"))
-        tb.configure(state="disabled")
+        # Statblock rendered as Markdown
+        md = MarkdownText(self._right, bg=SURFACE2)
+        md.pack(fill="both", expand=True, padx=16, pady=(0,16))
+        md.set_markdown(entry.get("statblock_md", "*(no statblock)*"))
 
     def _new_entry(self):
         self._show_edit({})

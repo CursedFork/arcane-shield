@@ -3,6 +3,8 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from datetime import date
+from pages.md_widget import MarkdownText
+from pages.ui_util import bind_row, ScrollList
 
 BG       = "#0f0f13"
 SURFACE  = "#1a1a24"
@@ -21,7 +23,13 @@ class NotesPage(ctk.CTkFrame):
         self.db = db
         self._notes: list[dict] = []
         self._selected: dict | None = None
+        self._debounce_id = None
         self._build()
+
+    def _debounce(self, fn, ms=160):
+        if self._debounce_id is not None:
+            self.after_cancel(self._debounce_id)
+        self._debounce_id = self.after(ms, fn)
 
     def _build(self):
         self.grid_columnconfigure(1, weight=1)
@@ -83,21 +91,19 @@ class NotesPage(ctk.CTkFrame):
                                            button_color=ACCENT, text_color=TEXT,
                                            dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
                                            height=28, font=ctk.CTkFont(size=12),
-                                           command=lambda _: self.refresh())
+                                           command=lambda _: self._apply_filters())
         self._session_cb.grid(row=0, column=0, sticky="ew", padx=(0,3))
 
         self._filter_date_var = tk.StringVar()
-        self._filter_date_var.trace_add("write", lambda *_: self.refresh())
+        self._filter_date_var.trace_add("write", lambda *_: self._debounce(self._apply_filters))
         ctk.CTkEntry(flt, textvariable=self._filter_date_var,
                      placeholder_text="Date (YYYY, YYYY-MM…)",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=28
                      ).grid(row=0, column=1, sticky="ew", padx=(3,0))
 
         # List
-        self._list_frame = ctk.CTkScrollableFrame(left, fg_color="transparent",
-                                                   scrollbar_button_color=ACCENT)
+        self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=3, column=0, sticky="nsew", padx=4, pady=(0,4))
-        self._list_frame.columnconfigure(0, weight=1)
 
         ctk.CTkButton(left, text="Export CSV", height=28, fg_color=SURFACE2,
                       hover_color=BORDER, text_color=MUTED, font=ctk.CTkFont(size=11),
@@ -111,8 +117,8 @@ class NotesPage(ctk.CTkFrame):
         self._show_placeholder()
 
     def _render_list(self):
-        for w in self._list_frame.winfo_children():
-            w.destroy()
+        body = self._list_frame.body
+        self._list_frame.clear()
 
         # Group by session label
         sessions: dict[str, list[dict]] = {}
@@ -120,29 +126,28 @@ class NotesPage(ctk.CTkFrame):
             sessions.setdefault(n["session_label"], []).append(n)
 
         for session, notes in sessions.items():
-            ctk.CTkLabel(self._list_frame, text=session,
-                         font=ctk.CTkFont(size=12, weight="bold"), text_color=ACCENT,
-                         anchor="w").pack(fill="x", padx=8, pady=(8,2))
+            tk.Label(body, text=session, font=("Segoe UI", 10, "bold"),
+                     fg=ACCENT, bg=SURFACE, anchor="w").pack(fill="x", padx=8, pady=(8,2))
             for note in notes:
-                row = ctk.CTkFrame(self._list_frame, fg_color=SURFACE2, corner_radius=4,
-                                   cursor="hand2")
+                row = tk.Frame(body, bg=SURFACE2, cursor="hand2")
                 row.pack(fill="x", padx=4, pady=2)
-                row.columnconfigure(0, weight=1)
                 preview = note.get("body","")[:60].replace("\n"," ")
                 if len(note.get("body","")) > 60:
                     preview += "…"
-                ctk.CTkLabel(row, text=preview, anchor="w", text_color=TEXT,
-                             font=ctk.CTkFont(size=12), wraplength=220
-                             ).grid(row=0, column=0, sticky="ew", padx=8, pady=(5,2))
-                ctk.CTkLabel(row, text=note.get("note_date",""), anchor="w",
-                             text_color=MUTED, font=ctk.CTkFont(size=10)
-                             ).grid(row=1, column=0, sticky="w", padx=8, pady=(0,5))
-                row.bind("<Button-1>", lambda e, n=note: self._select(n))
-                for c in row.winfo_children():
-                    c.bind("<Button-1>", lambda e, n=note: self._select(n))
+                tk.Label(row, text=preview, anchor="w", fg=TEXT, bg=SURFACE2,
+                         font=("Segoe UI", 10), wraplength=220, justify="left"
+                         ).pack(fill="x", padx=8, pady=(5,2))
+                tk.Label(row, text=note.get("note_date",""), anchor="w",
+                         fg=MUTED, bg=SURFACE2, font=("Segoe UI", 8)
+                         ).pack(fill="x", padx=8, pady=(0,5))
+                bind_row(row, lambda n=note: self._select(n), SURFACE2, BORDER)
+        self._list_frame.finalize()
 
     def refresh(self):
         self._session_cb.configure(values=["All Sessions"] + self.db.note_sessions())
+        self._apply_filters()
+
+    def _apply_filters(self):
         session = self._filter_session_var.get()
         self._notes = self.db.list_notes(
             session_label="" if session == "All Sessions" else session,
@@ -187,11 +192,9 @@ class NotesPage(ctk.CTkFrame):
 
         ctk.CTkFrame(self._right, height=1, fg_color=BORDER).pack(fill="x", padx=16, pady=(0,8))
 
-        tb = ctk.CTkTextbox(self._right, fg_color=SURFACE2, text_color=TEXT,
-                             border_color=BORDER, font=ctk.CTkFont(size=13), wrap="word")
-        tb.pack(fill="both", expand=True, padx=16, pady=(0,16))
-        tb.insert("1.0", note.get("body",""))
-        tb.configure(state="disabled")
+        md = MarkdownText(self._right, bg=SURFACE2)
+        md.pack(fill="both", expand=True, padx=16, pady=(0,16))
+        md.set_markdown(note.get("body",""))
 
     def _show_edit(self, note: dict):
         for w in self._right.winfo_children():
