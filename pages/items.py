@@ -125,10 +125,12 @@ class ItemsPage(ctk.CTkFrame):
 
     # ── List rendering ─────────────────────────────────────────────────────────
 
+    RENDER_CAP = 300
+
     def _render_list(self, items: list[dict]):
         for w in self._list_frame.winfo_children():
             w.destroy()
-        for item in items:
+        for item in items[:self.RENDER_CAP]:
             color = RARITY_COLORS.get(item.get("rarity", "Common"), MUTED)
             row = ctk.CTkFrame(self._list_frame, fg_color="transparent", corner_radius=4,
                                 cursor="hand2")
@@ -145,6 +147,12 @@ class ItemsPage(ctk.CTkFrame):
             row.bind("<Button-1>", lambda e, it=item: self._select(it))
             for child in row.winfo_children():
                 child.bind("<Button-1>", lambda e, it=item: self._select(it))
+        if len(items) > self.RENDER_CAP:
+            ctk.CTkLabel(self._list_frame,
+                         text=f"Showing {self.RENDER_CAP} of {len(items)} — "
+                              f"use Search or the filters to narrow results.",
+                         text_color=MUTED, font=ctk.CTkFont(size=11), wraplength=240
+                         ).pack(fill="x", padx=8, pady=8)
 
     def _apply_filters(self):
         search = self._search_var.get().strip()

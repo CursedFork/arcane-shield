@@ -561,7 +561,7 @@ class DmShieldPage(ctk.CTkFrame):
             for w in scroll.winfo_children():
                 w.destroy()
             items = items or self.db.list_mechanics(search=search_var.get().strip())
-            for m in items:
+            for m in items[:60]:
                 row = ctk.CTkFrame(scroll, fg_color=SURFACE2, corner_radius=4, cursor="hand2")
                 row.pack(fill="x", padx=2, pady=1)
                 row.columnconfigure(0, weight=1)
@@ -706,7 +706,7 @@ class DmShieldPage(ctk.CTkFrame):
         def _render():
             for w in scroll.winfo_children():
                 w.destroy()
-            for c in self.db.list_campaigns(search=search_var.get().strip()):
+            for c in self.db.list_campaigns(search=search_var.get().strip())[:60]:
                 row = ctk.CTkFrame(scroll, fg_color=SURFACE2, corner_radius=4, cursor="hand2")
                 row.pack(fill="x", padx=2, pady=1)
                 row.columnconfigure(0, weight=1)

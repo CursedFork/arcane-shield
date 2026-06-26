@@ -155,6 +155,12 @@ class Database:
     def __init__(self):
         self.conn = _connect()
         _migrate(self.conn)
+        self._bulk = False  # when True, create_* defer committing (see import_csv)
+
+    def _autocommit(self):
+        """Commit unless a bulk operation is batching writes into one transaction."""
+        if not self._bulk:
+            self.conn.commit()
 
     # ── Players ────────────────────────────────────────────────────────────────
 
@@ -171,7 +177,7 @@ class Database:
              int(d.get("max_hp", 1)), int(d.get("initiative_mod", 0)),
              int(d.get("passive_perception", 10)), d.get("notes") or None)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_player(self, id: int, d: dict) -> None:
@@ -220,7 +226,7 @@ class Database:
              d.get("description",""), d.get("mechanical_effect",""),
              d.get("charges") or None, d.get("source_campaign") or None, tags)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_item(self, id: int, d: dict) -> None:
@@ -279,7 +285,7 @@ class Database:
             (d["name"], int(d.get("ac",10)), int(d.get("max_hp",1)),
              int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_bestiary_entry(self, id: int, d: dict) -> None:
@@ -332,7 +338,7 @@ class Database:
             "INSERT INTO mechanics (title,body_md,campaign,tags) VALUES (?,?,?,?)",
             (d["title"], d.get("body_md",""), d.get("campaign") or None, tags)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_mechanic(self, id: int, d: dict) -> None:
@@ -367,7 +373,7 @@ class Database:
             "INSERT INTO campaigns (title,body_md,tags) VALUES (?,?,?)",
             (d["title"], d.get("body_md",""), tags)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_campaign(self, id: int, d: dict) -> None:
@@ -402,7 +408,7 @@ class Database:
             "INSERT INTO notes (session_label,note_date,body) VALUES (?,?,?)",
             (d["session_label"], d["note_date"], d["body"])
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_note(self, id: int, d: dict) -> None:
@@ -436,7 +442,7 @@ class Database:
             "INSERT INTO shops (shop_name,item_name,price,quantity,notes) VALUES (?,?,?,?,?)",
             (d["shop_name"], d["item_name"], d.get("price",""), int(d.get("quantity",1)), d.get("notes") or None)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_shop_item(self, id: int, d: dict) -> None:
@@ -470,7 +476,7 @@ class Database:
             "INSERT INTO party_items (item_name,owner,quantity,notes) VALUES (?,?,?,?)",
             (d["item_name"], d["owner"], int(d.get("quantity",1)), d.get("notes") or None)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_party_item(self, id: int, d: dict) -> None:
@@ -516,7 +522,7 @@ class Database:
             "INSERT INTO dm_shield_tabs (name, sort_order) VALUES (?,?)",
             (name, max_order + 1)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def rename_dm_tab(self, id: int, name: str) -> None:
@@ -559,7 +565,7 @@ class Database:
             (tab_id, title, content, max_order + 1, width, panel_type, panel_height,
              pos_x, pos_y, width_px, height_px)
         )
-        self.conn.commit()
+        self._autocommit()
         return cur.lastrowid
 
     def update_dm_panel(self, id: int, title: str, content: str, width: int,
@@ -697,6 +703,7 @@ class Database:
 
         inserted = 0; skipped = 0; errors: list[str] = []
         reader = csv.DictReader(io.StringIO(text))
+        self._bulk = True  # batch the whole file into ONE transaction (avoids per-row fsync)
         for i, row in enumerate(reader, start=2):
             try:
                 row = {k: (v.strip() if v else v) for k, v in row.items()}
@@ -779,6 +786,10 @@ class Database:
                 inserted += 1
             except Exception as e:
                 errors.append(f"Row {i}: {e}")
+        try:
+            self.conn.commit()  # single commit for the whole file
+        finally:
+            self._bulk = False
         return {"table": table, "inserted": inserted, "skipped": skipped, "errors": errors}
 
 

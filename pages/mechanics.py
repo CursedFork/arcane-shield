@@ -91,10 +91,12 @@ class MechanicsPage(ctk.CTkFrame):
         self._right.grid_rowconfigure(1, weight=1)
         self._show_placeholder()
 
+    RENDER_CAP = 300
+
     def _render_list(self):
         for w in self._list_frame.winfo_children():
             w.destroy()
-        for item in self._items:
+        for item in self._items[:self.RENDER_CAP]:
             row = ctk.CTkFrame(self._list_frame, fg_color="transparent", cursor="hand2")
             row.pack(fill="x", padx=2, pady=1)
             row.columnconfigure(0, weight=1)
@@ -106,6 +108,12 @@ class MechanicsPage(ctk.CTkFrame):
             row.bind("<Button-1>", lambda e, it=item: self._select(it))
             for c in row.winfo_children():
                 c.bind("<Button-1>", lambda e, it=item: self._select(it))
+        if len(self._items) > self.RENDER_CAP:
+            ctk.CTkLabel(self._list_frame,
+                         text=f"Showing {self.RENDER_CAP} of {len(self._items)} — "
+                              f"use Search or the filters to narrow results.",
+                         text_color=MUTED, font=ctk.CTkFont(size=11), wraplength=240
+                         ).pack(fill="x", padx=8, pady=8)
 
     def refresh(self):
         self._campaign_cb.configure(values=["All Campaigns"] + self.db.mechanic_campaigns())
