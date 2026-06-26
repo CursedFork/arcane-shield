@@ -101,6 +101,13 @@ class DmShieldPage(ctk.CTkFrame):
             command=self._new_panel
         ).pack(side="right", padx=(0, 2), pady=8)
 
+        ctk.CTkButton(
+            self._tab_bar, text="🎲 Dice", width=72, height=30,
+            fg_color="transparent", hover_color=SURFACE2,
+            text_color=MUTED, font=ctk.CTkFont(size=12),
+            command=self._open_dice_roller
+        ).pack(side="right", padx=(0, 2), pady=8)
+
         # ── Free-form canvas (absolute panel positioning) ────────────────────
         wrap = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=8)
         wrap.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 16))
@@ -119,6 +126,110 @@ class DmShieldPage(ctk.CTkFrame):
         # Mouse-wheel scrolls the canvas (when not over an inner scroll area)
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind("<Configure>", lambda e: self._update_scrollregion())
+
+    # ── Dice roller (top-bar) ────────────────────────────────────────────────
+
+    DICE = [2, 3, 4, 6, 8, 10, 12, 20, 100]
+
+    def _open_dice_roller(self):
+        # Reuse a single roller window.
+        win = getattr(self, "_dice_win", None)
+        if win is not None and win.winfo_exists():
+            win.deiconify(); win.lift(); win.focus_force()
+            return
+
+        win = ctk.CTkToplevel(self)
+        self._dice_win = win
+        win.title("Dice Roller")
+        win.geometry("320x440")
+        win.configure(fg_color=SURFACE)
+        win.attributes("-topmost", True)
+        try:
+            win.after(200, lambda: win.iconbitmap(
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), "icon.ico")))
+        except Exception:
+            pass
+
+        # Result display
+        result_var = tk.StringVar(value="—")
+        breakdown_var = tk.StringVar(value="Pick a die to roll")
+        ctk.CTkLabel(win, textvariable=result_var, text_color=ACCENT,
+                     font=ctk.CTkFont(size=40, weight="bold")
+                     ).pack(pady=(14, 0))
+        ctk.CTkLabel(win, textvariable=breakdown_var, text_color=MUTED,
+                     font=ctk.CTkFont(size=12), wraplength=290).pack(pady=(0, 8))
+
+        # Controls: quantity · modifier · advantage
+        ctrl = ctk.CTkFrame(win, fg_color="transparent")
+        ctrl.pack(fill="x", padx=14, pady=(0, 6))
+        qty_var = tk.StringVar(value="1")
+        mod_var = tk.StringVar(value="0")
+        advdis_var = tk.StringVar(value="Normal")
+
+        ctk.CTkLabel(ctrl, text="Qty", text_color=MUTED, font=ctk.CTkFont(size=11)
+                     ).grid(row=0, column=0, padx=(0, 2))
+        ctk.CTkEntry(ctrl, textvariable=qty_var, width=42, height=28, justify="center",
+                     fg_color=SURFACE2, border_color=BORDER, text_color=TEXT
+                     ).grid(row=0, column=1, padx=(0, 8))
+        ctk.CTkLabel(ctrl, text="Mod", text_color=MUTED, font=ctk.CTkFont(size=11)
+                     ).grid(row=0, column=2, padx=(0, 2))
+        ctk.CTkEntry(ctrl, textvariable=mod_var, width=48, height=28, justify="center",
+                     fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
+                     placeholder_text="+/-").grid(row=0, column=3, padx=(0, 8))
+        ctk.CTkOptionMenu(ctrl, variable=advdis_var,
+                          values=["Normal", "Advantage", "Disadvantage"],
+                          width=120, height=28, fg_color=SURFACE2, button_color=ACCENT,
+                          button_hover_color=ACCENT_H, text_color=TEXT,
+                          font=ctk.CTkFont(size=11)).grid(row=0, column=4)
+
+        # Dice grid (d2 … d100)
+        grid = ctk.CTkFrame(win, fg_color="transparent")
+        grid.pack(padx=14, pady=(4, 8))
+        for i in range(3):
+            grid.columnconfigure(i, weight=1)
+
+        log_lines: list[str] = []
+        log_box = None  # assigned below
+
+        def do_roll(sides: int):
+            try:
+                qty = max(1, min(100, int(qty_var.get() or 1)))
+            except ValueError:
+                qty = 1
+            try:
+                mod = int(mod_var.get() or 0)
+            except ValueError:
+                mod = 0
+            expr = f"{qty}d{sides}"
+            if mod > 0:
+                expr += f"+{mod}"
+            elif mod < 0:
+                expr += f"{mod}"
+            suffix = {"Advantage": "adv", "Disadvantage": "dis"}.get(advdis_var.get(), "")
+            r = dice_module.roll(expr + suffix)
+            result_var.set(str(r["total"]))
+            breakdown_var.set(dice_module.format_result(r))
+            log_lines.insert(0, dice_module.format_result(r))
+            del log_lines[12:]
+            log_box.configure(state="normal")
+            log_box.delete("1.0", "end")
+            log_box.insert("1.0", "\n".join(log_lines))
+            log_box.configure(state="disabled")
+
+        for idx, sides in enumerate(self.DICE):
+            ctk.CTkButton(grid, text=f"d{sides}", width=86, height=44,
+                          fg_color=SURFACE2, hover_color=ACCENT, text_color=TEXT,
+                          font=ctk.CTkFont(size=16, weight="bold"),
+                          command=lambda s=sides: do_roll(s)
+                          ).grid(row=idx // 3, column=idx % 3, padx=4, pady=4)
+
+        ctk.CTkLabel(win, text="Roll history", text_color=MUTED,
+                     font=ctk.CTkFont(size=11), anchor="w"
+                     ).pack(fill="x", padx=16, pady=(2, 0))
+        log_box = ctk.CTkTextbox(win, height=96, fg_color=SURFACE2, text_color=TEXT,
+                                 border_color=BORDER, font=ctk.CTkFont(size=11), wrap="word")
+        log_box.pack(fill="both", expand=True, padx=14, pady=(2, 12))
+        log_box.configure(state="disabled")
 
     # ── Tab bar ────────────────────────────────────────────────────────────────
 
