@@ -22,7 +22,11 @@ _OFFICIAL_SOURCES = (
 
 
 def classify_bestiary_source(statblock_md: str) -> str:
-    """Return the official source-book name, or 'Homebrew' if not official."""
+    """Classify a statblock's source:
+    - official WotC book   -> its name (e.g. 'Monster Manual')
+    - listed but unofficial -> 'Third-Party'
+    - no source line at all  -> 'Homebrew'
+    """
     m = _SRC_RE.search(statblock_md or "")
     if not m:
         return "Homebrew"
@@ -34,7 +38,7 @@ def classify_bestiary_source(statblock_md: str) -> str:
             if low.startswith("monster manual"):
                 return "Monster Manual"
             return base
-    return "Homebrew"
+    return "Third-Party"
 
 
 def _db_path() -> Path:
@@ -167,6 +171,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for r in conn.execute("SELECT id, statblock_md FROM bestiary").fetchall():
             conn.execute("UPDATE bestiary SET source=? WHERE id=?",
                          (classify_bestiary_source(r[1]), r[0]))
+    except Exception:
+        pass
+
+    # Versioned re-classification: bump when the source rules change so existing
+    # DBs get re-labeled once. v1 = split unofficial-with-source into 'Third-Party'.
+    try:
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        if ver < 1:
+            for r in conn.execute("SELECT id, statblock_md FROM bestiary").fetchall():
+                conn.execute("UPDATE bestiary SET source=? WHERE id=?",
+                             (classify_bestiary_source(r[1]), r[0]))
+            conn.execute("PRAGMA user_version = 1")
     except Exception:
         pass
     conn.commit()
@@ -353,12 +369,12 @@ class Database:
         return self._distinct_tags("bestiary")
 
     def bestiary_sources(self) -> list[str]:
-        """Distinct source books — official names sorted first, Homebrew last."""
+        """Distinct source books — official names first, then Third-Party, Homebrew."""
         srcs = [r[0] for r in self.conn.execute(
             "SELECT DISTINCT source FROM bestiary WHERE source!='' ORDER BY source"
         ).fetchall()]
-        # Keep 'Homebrew' at the bottom of the list.
-        srcs = [s for s in srcs if s != "Homebrew"] + (["Homebrew"] if "Homebrew" in srcs else [])
+        tail = [s for s in ("Third-Party", "Homebrew") if s in srcs]
+        srcs = [s for s in srcs if s not in tail] + tail
         return srcs
 
     # ── Mechanics ──────────────────────────────────────────────────────────────
