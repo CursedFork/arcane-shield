@@ -319,7 +319,7 @@ class InitiativePage(ctk.CTkFrame):
 
         current = set(c.get("conditions", []))
         vars_: dict[str, tk.BooleanVar] = {}
-        for cond in CONDITIONS:
+        for cond in (self.db.condition_names() or CONDITIONS):
             v = tk.BooleanVar(value=cond in current)
             ctk.CTkCheckBox(dlg, text=cond, variable=v, text_color=TEXT,
                             checkbox_width=18, checkbox_height=18,

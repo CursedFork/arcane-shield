@@ -91,6 +91,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
             tags TEXT NOT NULL DEFAULT '[]',
             source TEXT NOT NULL DEFAULT 'Homebrew'
         );
+        CREATE TABLE IF NOT EXISTS spells (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 0,
+            school TEXT NOT NULL DEFAULT '',
+            casting_time TEXT NOT NULL DEFAULT '',
+            range TEXT NOT NULL DEFAULT '',
+            components TEXT NOT NULL DEFAULT '',
+            duration TEXT NOT NULL DEFAULT '',
+            concentration INTEGER NOT NULL DEFAULT 0,
+            ritual INTEGER NOT NULL DEFAULT 0,
+            classes TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            source TEXT,
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS conditions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS mechanics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -189,7 +211,55 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("PRAGMA user_version = 1")
     except Exception:
         pass
+
+    # Seed the standard 5e conditions once (paraphrased rules summaries).
+    try:
+        if conn.execute("SELECT COUNT(*) FROM conditions").fetchone()[0] == 0:
+            for i, (nm, desc) in enumerate(_CONDITION_SEED):
+                conn.execute(
+                    "INSERT OR IGNORE INTO conditions (name,description,sort_order) VALUES (?,?,?)",
+                    (nm, desc, i))
+    except Exception:
+        pass
     conn.commit()
+
+
+# Standard 5e conditions — concise, paraphrased mechanical summaries.
+_CONDITION_SEED = [
+    ("Blinded", "- Can't see; automatically fails any check requiring sight.\n"
+                "- Attack rolls against the creature have **advantage**; its own attack rolls have **disadvantage**."),
+    ("Charmed", "- Can't attack the charmer or target them with harmful effects.\n"
+                "- The charmer has **advantage** on social ability checks to interact with the creature."),
+    ("Deafened", "- Can't hear; automatically fails any check requiring hearing."),
+    ("Exhaustion", "Measured in 6 levels (cumulative):\n"
+                   "1. Disadvantage on ability checks\n2. Speed halved\n"
+                   "3. Disadvantage on attack rolls & saving throws\n4. Hit point maximum halved\n"
+                   "5. Speed reduced to 0\n6. Death.\nA long rest removes one level (with food & drink)."),
+    ("Frightened", "- Disadvantage on ability checks and attack rolls while the source of fear is in line of sight.\n"
+                   "- Can't willingly move closer to the source."),
+    ("Grappled", "- Speed becomes 0; can't benefit from bonuses to speed.\n"
+                 "- Ends if the grappler is incapacitated or the creature is removed from reach."),
+    ("Incapacitated", "- Can't take actions or reactions."),
+    ("Invisible", "- Impossible to see without special senses; counts as heavily obscured.\n"
+                  "- Attack rolls against the creature have **disadvantage**; its own attack rolls have **advantage**."),
+    ("Paralyzed", "- Incapacitated; can't move or speak.\n"
+                  "- Automatically fails STR and DEX saves.\n"
+                  "- Attacks against it have advantage; any hit from within 5 ft. is a **critical hit**."),
+    ("Petrified", "- Transformed to solid substance; incapacitated, can't move or speak, unaware.\n"
+                  "- Weight x10, stops aging; attacks have advantage; fails STR & DEX saves.\n"
+                  "- Resistance to all damage; immune to poison and disease."),
+    ("Poisoned", "- Disadvantage on attack rolls and ability checks."),
+    ("Prone", "- Can only crawl unless it stands up (costs half its movement).\n"
+              "- Disadvantage on attack rolls.\n"
+              "- Attacks within 5 ft. have advantage; ranged attacks against it have disadvantage."),
+    ("Restrained", "- Speed becomes 0.\n"
+                   "- Attacks against it have advantage; its own attacks have disadvantage.\n"
+                   "- Disadvantage on DEX saving throws."),
+    ("Stunned", "- Incapacitated, can't move, can speak only falteringly.\n"
+                "- Automatically fails STR and DEX saves; attacks against it have advantage."),
+    ("Unconscious", "- Incapacitated, can't move or speak, unaware; drops what it's holding and falls prone.\n"
+                    "- Fails STR & DEX saves; attacks have advantage; hits within 5 ft. are **critical hits**."),
+]
 
 
 def _rows(rs) -> list[dict]:
@@ -423,6 +493,108 @@ class Database:
 
     def delete_mechanic(self, id: int) -> None:
         self.conn.execute("DELETE FROM mechanics WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Spells ─────────────────────────────────────────────────────────────────
+
+    def list_spells(self, search="", level="", school="", cls="") -> list[dict]:
+        q = "SELECT * FROM spells WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (name LIKE ? OR description LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        if level != "" and level is not None:
+            q += " AND level=?"; p.append(int(level))
+        if school:
+            q += " AND school=?"; p.append(school)
+        q += " ORDER BY level, name"
+        rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        if cls:
+            low = cls.lower()
+            rows = [r for r in rows if low in (r.get("classes", "") or "").lower()]
+        return rows
+
+    def create_spell(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO spells (name,level,school,casting_time,range,components,duration,"
+            "concentration,ritual,classes,description,source,tags) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (d["name"], int(d.get("level", 0) or 0), d.get("school", ""),
+             d.get("casting_time", ""), d.get("range", ""), d.get("components", ""),
+             d.get("duration", ""), 1 if d.get("concentration") else 0,
+             1 if d.get("ritual") else 0, d.get("classes", ""), d.get("description", ""),
+             d.get("source") or None, tags)
+        )
+        self._autocommit()
+        return cur.lastrowid
+
+    def update_spell(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE spells SET name=?,level=?,school=?,casting_time=?,range=?,components=?,"
+            "duration=?,concentration=?,ritual=?,classes=?,description=?,source=?,tags=? WHERE id=?",
+            (d["name"], int(d.get("level", 0) or 0), d.get("school", ""),
+             d.get("casting_time", ""), d.get("range", ""), d.get("components", ""),
+             d.get("duration", ""), 1 if d.get("concentration") else 0,
+             1 if d.get("ritual") else 0, d.get("classes", ""), d.get("description", ""),
+             d.get("source") or None, tags, id)
+        )
+        self.conn.commit()
+
+    def delete_spell(self, id: int) -> None:
+        self.conn.execute("DELETE FROM spells WHERE id=?", (id,)); self.conn.commit()
+
+    def spell_schools(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT school FROM spells WHERE school!='' ORDER BY school"
+        ).fetchall()]
+
+    def spell_levels(self) -> list[int]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT level FROM spells ORDER BY level"
+        ).fetchall()]
+
+    def spell_classes(self) -> list[str]:
+        out: set[str] = set()
+        for r in self.conn.execute("SELECT classes FROM spells WHERE classes!=''").fetchall():
+            for c in re.split(r"[;,]", r[0]):
+                c = c.strip()
+                if c:
+                    out.add(c)
+        return sorted(out, key=str.lower)
+
+    # ── Conditions ─────────────────────────────────────────────────────────────
+
+    def list_conditions(self, search="") -> list[dict]:
+        q = "SELECT * FROM conditions WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (name LIKE ? OR description LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        q += " ORDER BY sort_order, name"
+        return _rows(self.conn.execute(q, p).fetchall())
+
+    def condition_names(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT name FROM conditions ORDER BY sort_order, name"
+        ).fetchall()]
+
+    def create_condition(self, d: dict) -> int:
+        order = self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order),0)+1 FROM conditions").fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO conditions (name,description,sort_order) VALUES (?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET description=excluded.description",
+            (d["name"], d.get("description", ""), d.get("sort_order", order))
+        )
+        self._autocommit()
+        return cur.lastrowid
+
+    def update_condition(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE conditions SET name=?,description=? WHERE id=?",
+            (d["name"], d.get("description", ""), id)
+        )
+        self.conn.commit()
+
+    def delete_condition(self, id: int) -> None:
+        self.conn.execute("DELETE FROM conditions WHERE id=?", (id,)); self.conn.commit()
 
     # ── Campaigns ──────────────────────────────────────────────────────────────
 
@@ -706,6 +878,7 @@ class Database:
     CLEARABLE_TABLES = {
         "magic_items":  "Magic Items",
         "bestiary":     "Bestiary",
+        "spells":       "Spells",
         "mechanics":    "Mechanics",
         "campaigns":    "Campaign Info",
         "notes":        "Notes",
@@ -743,6 +916,17 @@ class Database:
         elif table == "bestiary":
             w.writerow(["name","ac","max_hp","initiative_mod","cr","statblock_md","tags","source"])
             for r in self.conn.execute("SELECT name,ac,max_hp,initiative_mod,cr,statblock_md,tags,source FROM bestiary").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
+        elif table == "spells":
+            cols = ["name","level","school","casting_time","range","components",
+                    "duration","concentration","ritual","classes","description","source","tags"]
+            w.writerow(cols)
+            for r in self.conn.execute(
+                    "SELECT name,level,school,casting_time,range,components,duration,"
+                    "concentration,ritual,classes,description,source,tags FROM spells").fetchall():
                 row = list(r)
                 row[-1] = ";".join(json.loads(row[-1] or "[]"))
                 w.writerow(row)
@@ -845,6 +1029,23 @@ class Database:
                         "campaign": row.get("campaign"),
                         "tags": _tag_list(row.get("tags","")),
                     })
+                elif table == "spells":
+                    if not row.get("name"): skipped += 1; continue
+                    self.create_spell({
+                        "name": row["name"],
+                        "level": _int(row.get("level"), 0),
+                        "school": row.get("school",""),
+                        "casting_time": row.get("casting_time",""),
+                        "range": row.get("range",""),
+                        "components": row.get("components",""),
+                        "duration": row.get("duration",""),
+                        "concentration": str(row.get("concentration","")).lower() in ("1","true","yes"),
+                        "ritual": str(row.get("ritual","")).lower() in ("1","true","yes"),
+                        "classes": row.get("classes",""),
+                        "description": row.get("description",""),
+                        "source": row.get("source"),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
                 elif table == "campaigns":
                     if not row.get("title"): skipped += 1; continue
                     self.create_campaign({
@@ -909,6 +1110,8 @@ def _detect_table(headers: set, filename: str) -> str | None:
         return "notes"
     if "item_type" in h and "rarity" in h:
         return "magic_items"
+    if "school" in h and ("level" in h or "casting_time" in h):
+        return "spells"
     if any("statblock" in c for c in h) or ("initiative_mod" in h and "cr" in h):
         return "bestiary"
     if "body_md" in h and "campaign" in h:
@@ -918,6 +1121,8 @@ def _detect_table(headers: set, filename: str) -> str | None:
 
     # Filename fallback
     fn = filename.lower()
+    if "spell" in fn:
+        return "spells"
     if any(x in fn for x in ("player", "roster")):
         return "players"
     if any(x in fn for x in ("party_item", "loot", "inventory")):

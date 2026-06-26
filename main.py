@@ -14,6 +14,8 @@ except Exception:
     pass
 from pages.items import ItemsPage
 from pages.bestiary import BestiaryPage
+from pages.spells import SpellsPage
+from pages.conditions import ConditionsPage
 from pages.mechanics import MechanicsPage
 from pages.campaigns import CampaignsPage
 from pages.notes import NotesPage
@@ -39,6 +41,8 @@ NAV_TOP = [
 NAV_CONTENT = [
     ("items",      "✦  Magic Items"),
     ("bestiary",   "☠  Bestiary"),
+    ("spells",     "✨  Spells"),
+    ("conditions", "🜸  Conditions"),
     ("mechanics",  "⚙  Mechanics"),
     ("campaigns",  "📖  Campaigns"),
     ("notes",      "✎  Notes"),
@@ -147,6 +151,8 @@ class App(ctk.CTk):
         self._pages: dict[str, ctk.CTkFrame] = {
             "items":      ItemsPage(self._content, self.db),
             "bestiary":   BestiaryPage(self._content, self.db),
+            "spells":     SpellsPage(self._content, self.db),
+            "conditions": ConditionsPage(self._content, self.db),
             "mechanics":  MechanicsPage(self._content, self.db),
             "campaigns":  CampaignsPage(self._content, self.db),
             "notes":      NotesPage(self._content, self.db),
