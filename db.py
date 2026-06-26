@@ -2,9 +2,39 @@
 import sqlite3
 import json
 import os
+import re
 import csv
 import io
 from pathlib import Path
+
+
+# ── Bestiary source classification ──────────────────────────────────────────────
+# Statblocks carry a "*Source: <book>*" line. Official D&D (WotC) books are kept by
+# name; anything else (third-party / unknown) is bucketed as "Homebrew" per request.
+_SRC_RE = re.compile(r"\*Source:\s*(.+?)\s*\*")
+_OFFICIAL_SOURCES = (
+    "monster manual", "volo's guide to monsters", "mordenkainen's tome of foes",
+    "essentials kit", "5e core rules", "player's handbook",
+    "dungeon master's guide", "tasha's cauldron of everything",
+    "xanathar's guide to everything", "fizban's treasury of dragons",
+    "adventures", "extra (adventurers league)",
+)
+
+
+def classify_bestiary_source(statblock_md: str) -> str:
+    """Return the official source-book name, or 'Homebrew' if not official."""
+    m = _SRC_RE.search(statblock_md or "")
+    if not m:
+        return "Homebrew"
+    raw = m.group(1).strip()
+    base = re.sub(r"\s*\((?:SRD|BR)\)\s*$", "", raw).strip()  # drop (SRD)/(BR) qualifier
+    low = base.lower()
+    for off in _OFFICIAL_SOURCES:
+        if low == off or low.startswith(off):
+            if low.startswith("monster manual"):
+                return "Monster Manual"
+            return base
+    return "Homebrew"
 
 
 def _db_path() -> Path:
@@ -54,7 +84,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             initiative_mod INTEGER NOT NULL DEFAULT 0,
             cr TEXT NOT NULL DEFAULT '0',
             statblock_md TEXT NOT NULL DEFAULT '',
-            tags TEXT NOT NULL DEFAULT '[]'
+            tags TEXT NOT NULL DEFAULT '[]',
+            source TEXT NOT NULL DEFAULT 'Homebrew'
         );
         CREATE TABLE IF NOT EXISTS mechanics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +161,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE dm_shield_panels ADD COLUMN {col} {defn}")
         except Exception:
             pass
+    # Add bestiary.source and backfill it once (only runs when newly added)
+    try:
+        conn.execute("ALTER TABLE bestiary ADD COLUMN source TEXT NOT NULL DEFAULT 'Homebrew'")
+        for r in conn.execute("SELECT id, statblock_md FROM bestiary").fetchall():
+            conn.execute("UPDATE bestiary SET source=? WHERE id=?",
+                         (classify_bestiary_source(r[1]), r[0]))
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -266,12 +305,14 @@ class Database:
 
     # ── Bestiary ───────────────────────────────────────────────────────────────
 
-    def list_bestiary(self, search="", cr="", tag="") -> list[dict]:
+    def list_bestiary(self, search="", cr="", tag="", source="") -> list[dict]:
         q = "SELECT * FROM bestiary WHERE 1=1"; p: list = []
         if search:
             q += " AND name LIKE ?"; p.append(f"%{search}%")
         if cr:
             q += " AND cr=?"; p.append(cr)
+        if source:
+            q += " AND source=?"; p.append(source)
         q += " ORDER BY name"
         rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
         if tag:
@@ -280,20 +321,22 @@ class Database:
 
     def create_bestiary_entry(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
+        source = d.get("source") or classify_bestiary_source(d.get("statblock_md", ""))
         cur = self.conn.execute(
-            "INSERT INTO bestiary (name,ac,max_hp,initiative_mod,cr,statblock_md,tags) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO bestiary (name,ac,max_hp,initiative_mod,cr,statblock_md,tags,source) VALUES (?,?,?,?,?,?,?,?)",
             (d["name"], int(d.get("ac",10)), int(d.get("max_hp",1)),
-             int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags)
+             int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags, source)
         )
         self._autocommit()
         return cur.lastrowid
 
     def update_bestiary_entry(self, id: int, d: dict) -> None:
         tags = json.dumps(_tag_list(d.get("tags", [])))
+        source = d.get("source") or classify_bestiary_source(d.get("statblock_md", ""))
         self.conn.execute(
-            "UPDATE bestiary SET name=?,ac=?,max_hp=?,initiative_mod=?,cr=?,statblock_md=?,tags=? WHERE id=?",
+            "UPDATE bestiary SET name=?,ac=?,max_hp=?,initiative_mod=?,cr=?,statblock_md=?,tags=?,source=? WHERE id=?",
             (d["name"], int(d.get("ac",10)), int(d.get("max_hp",1)),
-             int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags, id)
+             int(d.get("initiative_mod",0)), d.get("cr","0"), d.get("statblock_md",""), tags, source, id)
         )
         self.conn.commit()
 
@@ -308,6 +351,15 @@ class Database:
     def bestiary_types(self) -> list[str]:
         """Monster types/keywords drawn from tags (e.g. Undead, Dragon, Fiend)."""
         return self._distinct_tags("bestiary")
+
+    def bestiary_sources(self) -> list[str]:
+        """Distinct source books — official names sorted first, Homebrew last."""
+        srcs = [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT source FROM bestiary WHERE source!='' ORDER BY source"
+        ).fetchall()]
+        # Keep 'Homebrew' at the bottom of the list.
+        srcs = [s for s in srcs if s != "Homebrew"] + (["Homebrew"] if "Homebrew" in srcs else [])
+        return srcs
 
     # ── Mechanics ──────────────────────────────────────────────────────────────
 
@@ -649,8 +701,8 @@ class Database:
                 w.writerow(row)
 
         elif table == "bestiary":
-            w.writerow(["name","ac","max_hp","initiative_mod","cr","statblock_md","tags"])
-            for r in self.conn.execute("SELECT name,ac,max_hp,initiative_mod,cr,statblock_md,tags FROM bestiary").fetchall():
+            w.writerow(["name","ac","max_hp","initiative_mod","cr","statblock_md","tags","source"])
+            for r in self.conn.execute("SELECT name,ac,max_hp,initiative_mod,cr,statblock_md,tags,source FROM bestiary").fetchall():
                 row = list(r)
                 row[-1] = ";".join(json.loads(row[-1] or "[]"))
                 w.writerow(row)
@@ -743,6 +795,7 @@ class Database:
                         "cr": row.get("cr","0"),
                         "statblock_md": row.get("statblock_md",""),
                         "tags": _tag_list(row.get("tags","")),
+                        "source": row.get("source"),  # else auto-classified from statblock
                     })
                 elif table == "mechanics":
                     if not row.get("title"): skipped += 1; continue

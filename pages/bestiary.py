@@ -82,6 +82,15 @@ class BestiaryPage(ctk.CTkFrame):
                                         command=lambda _: self._apply_filters())
         self._type_cb.grid(row=1, column=1, sticky="ew", padx=(3,0))
 
+        self._source_var = tk.StringVar(value="All Sources")
+        self._source_cb = ctk.CTkComboBox(flt, variable=self._source_var, values=["All Sources"],
+                                          fg_color=SURFACE2, border_color=BORDER,
+                                          button_color=ACCENT, text_color=TEXT,
+                                          dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                          height=28, font=ctk.CTkFont(size=12),
+                                          command=lambda _: self._apply_filters())
+        self._source_cb.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
+
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
 
@@ -125,10 +134,12 @@ class BestiaryPage(ctk.CTkFrame):
         search = self._search_var.get().strip()
         cr = self._cr_var.get()
         mtype = self._type_var.get()
+        source = self._source_var.get()
         entries = self.db.list_bestiary(
             search=search,
             cr="" if cr == "All CR" else cr,
             tag="" if mtype == "All Types" else mtype,
+            source="" if source == "All Sources" else source,
         )
         self._entries = entries
         self._render_list(entries)
@@ -137,6 +148,7 @@ class BestiaryPage(ctk.CTkFrame):
         crs = self.db.bestiary_crs()
         self._cr_cb.configure(values=["All CR"] + crs)
         self._type_cb.configure(values=["All Types"] + self.db.bestiary_types())
+        self._source_cb.configure(values=["All Sources"] + self.db.bestiary_sources())
         self._apply_filters()
 
     def _select(self, entry: dict):
@@ -163,6 +175,9 @@ class BestiaryPage(ctk.CTkFrame):
         ctk.CTkLabel(hdr, text=f"CR {entry.get('cr','?')} · AC {entry.get('ac','?')} · {entry.get('max_hp','?')} HP · Init +{entry.get('initiative_mod',0)}",
                      text_color=MUTED, font=ctk.CTkFont(size=12), anchor="w"
                      ).grid(row=1, column=0, sticky="w")
+        ctk.CTkLabel(hdr, text=f"Source: {entry.get('source','Homebrew')}",
+                     text_color=ACCENT, font=ctk.CTkFont(size=11), anchor="w"
+                     ).grid(row=2, column=0, sticky="w")
 
         btn_row = ctk.CTkFrame(hdr, fg_color="transparent")
         btn_row.grid(row=0, column=1, rowspan=2, sticky="ne")
