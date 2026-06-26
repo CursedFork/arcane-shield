@@ -31,7 +31,12 @@ ACCENT   = "#7c5cbf"
 TEXT     = "#e2e0f0"
 MUTED    = "#8a8aa0"
 
-NAV_ITEMS = [
+# DM Shield is pinned to the top, Bulk Import to the bottom; content tabs sit
+# between them. (New content tabs get added to NAV_CONTENT.)
+NAV_TOP = [
+    ("dm_shield",  "🛡  DM Shield"),
+]
+NAV_CONTENT = [
     ("items",      "✦  Magic Items"),
     ("bestiary",   "☠  Bestiary"),
     ("mechanics",  "⚙  Mechanics"),
@@ -39,9 +44,11 @@ NAV_ITEMS = [
     ("notes",      "✎  Notes"),
     ("shops",      "⚖  Shops & Loot"),
     ("initiative", "⚔  Initiative"),
-    ("import",     "⬆  Bulk Import"),
-    ("dm_shield",  "🛡  DM Shield"),
 ]
+NAV_BOTTOM = [
+    ("import",     "⬆  Bulk Import"),
+]
+NAV_ITEMS = NAV_TOP + NAV_CONTENT + NAV_BOTTOM
 
 
 class App(ctk.CTk):
@@ -89,24 +96,45 @@ class App(ctk.CTk):
         ).pack(pady=(0, 20), padx=16, anchor="w")
 
         self._nav_btns: dict[str, ctk.CTkButton] = {}
-        for key, label in NAV_ITEMS:
+        self._nav_defaults: dict[str, dict] = {}
+
+        def make_nav_btn(key, label, *, fg="transparent", text=MUTED,
+                         border=0, border_color=BORDER, **pack_kw):
             btn = ctk.CTkButton(
                 sb, text=label, anchor="w",
-                fg_color="transparent", hover_color=SURFACE2,
-                text_color=MUTED, font=ctk.CTkFont(size=13),
-                corner_radius=0, height=38,
+                fg_color=fg, hover_color=SURFACE2,
+                text_color=text, font=ctk.CTkFont(size=13),
+                corner_radius=0 if not border else 6, height=38,
+                border_width=border, border_color=border_color,
                 command=lambda k=key: self.show_page(k)
             )
-            btn.pack(fill="x", padx=0, pady=0)
+            btn.pack(**pack_kw)
             self._nav_btns[key] = btn
+            self._nav_defaults[key] = {"fg_color": fg, "text_color": text}
+            return btn
 
-        # DB location label at bottom
+        # ── Top: DM Shield (primary, emphasized) ─────────────────────────────
+        for key, label in NAV_TOP:
+            make_nav_btn(key, label, text=TEXT, fill="x", padx=0, pady=0)
+        ctk.CTkFrame(sb, height=1, fg_color=BORDER).pack(fill="x", padx=12, pady=(6, 6))
+
+        # ── Middle: content tabs ─────────────────────────────────────────────
+        for key, label in NAV_CONTENT:
+            make_nav_btn(key, label, fill="x", padx=0, pady=0)
+
+        # ── Bottom: DB label, then a clearly-set-apart Bulk Import ───────────
         from db import _db_path
         db_p = str(_db_path())
         ctk.CTkLabel(
             sb, text=f"DB: {os.path.basename(db_p)}",
             font=ctk.CTkFont(size=9), text_color=MUTED, wraplength=180
         ).pack(side="bottom", pady=8, padx=8)
+
+        for key, label in NAV_BOTTOM:
+            make_nav_btn(key, label, text=ACCENT, border=2, border_color=ACCENT,
+                         side="bottom", fill="x", padx=10, pady=(0, 6))
+        ctk.CTkFrame(sb, height=1, fg_color=BORDER).pack(side="bottom", fill="x",
+                                                         padx=12, pady=(6, 4))
 
     # ── Content area ───────────────────────────────────────────────────────────
 
@@ -142,7 +170,8 @@ class App(ctk.CTk):
             self._pages[self._current].grid_remove()
             btn = self._nav_btns.get(self._current)
             if btn:
-                btn.configure(text_color=MUTED, fg_color="transparent")
+                btn.configure(**self._nav_defaults.get(self._current,
+                              {"fg_color": "transparent", "text_color": MUTED}))
 
         self._current = name
         self._pages[name].grid()
