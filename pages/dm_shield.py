@@ -523,14 +523,11 @@ class DmShieldPage(ctk.CTkFrame):
         _refresh_notes()
 
     def _body_initiative(self, parent, panel: dict):
-        """Compact initiative tracker — state saved as JSON in panel.content."""
-        try:
-            state = json.loads(panel.get("content") or "{}")
-        except Exception:
-            state = {}
-
-        combatants: list[dict] = state.get("combatants", [])
-        turn_ref = [state.get("turn", 0)]
+        """Compact initiative tracker — shares the live encounter with the
+        Initiative sidebar tab (single source of truth)."""
+        state = self.db.get_live_encounter()
+        combatants: list[dict] = state.get("combatants", []) or []
+        turn_ref = [state.get("turn_idx", 0)]
         round_ref = [state.get("round", 1)]
 
         top = ctk.CTkFrame(parent, fg_color="transparent")
@@ -547,10 +544,11 @@ class DmShieldPage(ctk.CTkFrame):
         list_frame.columnconfigure(0, weight=1)
 
         def _save_state():
-            s = json.dumps({"combatants": combatants,
-                            "turn": turn_ref[0], "round": round_ref[0]})
-            self.db.update_dm_panel_content(panel["id"], s)
-            panel["content"] = s
+            self.db.set_live_encounter({
+                "combatants": combatants,
+                "turn_idx": turn_ref[0],
+                "round": round_ref[0],
+            })
 
         def _render_list():
             for w in list_frame.winfo_children():
@@ -611,46 +609,59 @@ class DmShieldPage(ctk.CTkFrame):
 
         _render_list()
 
-        # Quick-add row
-        add_row = ctk.CTkFrame(parent, fg_color="transparent")
-        add_row.pack(fill="x", padx=6, pady=(0, 6))
-        add_row.columnconfigure(0, weight=1)
+        # ── Add-combatant form (clearly labeled) ──────────────────────────────
+        add_f = ctk.CTkFrame(parent, fg_color=SURFACE2, corner_radius=6)
+        add_f.pack(fill="x", padx=6, pady=(2, 6))
+        ctk.CTkLabel(add_f, text="➕ Add creature or player", text_color=ACCENT,
+                     font=ctk.CTkFont(size=11, weight="bold"), anchor="w"
+                     ).pack(fill="x", padx=8, pady=(6, 2))
 
         name_var = tk.StringVar()
-        ctk.CTkEntry(add_row, textvariable=name_var, placeholder_text="Name",
-                     fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=26
-                     ).grid(row=0, column=0, sticky="ew", padx=(0,2))
+        ctk.CTkEntry(add_f, textvariable=name_var,
+                     placeholder_text="Name  (e.g. Goblin 1, or a PC's name)",
+                     fg_color=SURFACE, border_color=BORDER, text_color=TEXT, height=28
+                     ).pack(fill="x", padx=8, pady=(0, 4))
 
-        for col, (placeholder, attr, default) in enumerate([
-            ("Init","_init_var",""), ("AC","_ac_var","10"), ("HP","_hp_var","10")
-        ], start=1):
-            var = tk.StringVar(value=default)
-            setattr(parent, attr, var)
-            ctk.CTkEntry(add_row, textvariable=var, placeholder_text=placeholder,
-                         fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
-                         height=26, width=44
-                         ).grid(row=0, column=col, padx=2)
+        fields = ctk.CTkFrame(add_f, fg_color="transparent")
+        fields.pack(fill="x", padx=8, pady=(0, 4))
+        for i in range(3):
+            fields.columnconfigure(i, weight=1)
+
+        init_var = tk.StringVar()
+        ac_var = tk.StringVar(value="10")
+        hp_var = tk.StringVar(value="10")
+        for col, (cap, var, ph) in enumerate([
+            ("Initiative", init_var, "auto-roll"),
+            ("Armor Class", ac_var, "10"),
+            ("Max HP", hp_var, "10"),
+        ]):
+            cell = ctk.CTkFrame(fields, fg_color="transparent")
+            cell.grid(row=0, column=col, sticky="ew", padx=2)
+            ctk.CTkLabel(cell, text=cap, text_color=MUTED,
+                         font=ctk.CTkFont(size=9), anchor="w").pack(fill="x")
+            ctk.CTkEntry(cell, textvariable=var, placeholder_text=ph, fg_color=SURFACE,
+                         border_color=BORDER, text_color=TEXT, height=26).pack(fill="x")
 
         def add_combatant():
             name = name_var.get().strip()
-            if not name: return
+            if not name:
+                return
             try:
-                hp = int(getattr(parent,"_hp_var").get() or 10)
-                ac = int(getattr(parent,"_ac_var").get() or 10)
-                init_val = getattr(parent,"_init_var").get().strip()
-                initiative = int(init_val) if init_val else dice_module.roll("1d20")["total"]
+                hp = int(hp_var.get() or 10)
+                ac = int(ac_var.get() or 10)
+                iv = init_var.get().strip()
+                initiative = int(iv) if iv else dice_module.roll("1d20")["total"]
             except ValueError:
                 return
-            combatants.append({"name":name,"ac":ac,"max_hp":hp,"current_hp":hp,
-                                "initiative":initiative,"conditions":[]})
-            name_var.set("")
-            getattr(parent,"_init_var").set("")
+            combatants.append({"name": name, "ac": ac, "max_hp": hp, "current_hp": hp,
+                               "initiative_mod": 0, "initiative": initiative,
+                               "conditions": [], "is_player": False})
+            name_var.set(""); init_var.set("")
             _save_state(); _render_list()
 
-        ctk.CTkButton(add_row, text="Add", width=44, height=26,
-                      fg_color=ACCENT, hover_color=ACCENT_H, text_color=TEXT,
-                      font=ctk.CTkFont(size=11), command=add_combatant
-                      ).grid(row=0, column=4, padx=(2,0))
+        ctk.CTkButton(add_f, text="Add to initiative", height=28, fg_color=ACCENT,
+                      hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=11),
+                      command=add_combatant).pack(fill="x", padx=8, pady=(2, 8))
 
     def _body_mechanics(self, parent, panel: dict):
         """Searchable mechanics list with inline expansion."""

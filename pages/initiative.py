@@ -170,6 +170,31 @@ class InitiativePage(ctk.CTkFrame):
             is_active = (i == self._turn_idx % max(len(self._combatants), 1))
             self._render_combatant_row(c, i, is_active)
 
+        # Persist to the shared live encounter so the DM Shield panel stays in sync.
+        self._persist_live()
+
+    def _persist_live(self):
+        try:
+            self.db.set_live_encounter({
+                "combatants": self._combatants,
+                "turn_idx": self._turn_idx,
+                "round": self._round,
+            })
+        except Exception:
+            pass
+
+    def _load_live(self):
+        state = self.db.get_live_encounter()
+        self._combatants = state.get("combatants", []) or []
+        self._turn_idx = state.get("turn_idx", 0)
+        self._round = state.get("round", 1)
+        self._round_lbl.configure(text=f"Round {self._round}")
+        if self._combatants:
+            active = self._combatants[self._turn_idx % len(self._combatants)]
+            self._turn_lbl.configure(text=f"→ {active['name']}")
+        else:
+            self._turn_lbl.configure(text="")
+
     def _render_combatant_row(self, c: dict, idx: int, active: bool):
         bg = TURN_HL if active else SURFACE2
         border = ACCENT if active else BORDER
@@ -492,5 +517,7 @@ class InitiativePage(ctk.CTkFrame):
             messagebox.showerror("Load Error", str(e))
 
     def refresh(self):
+        # Pull the shared live encounter (may have changed in the DM Shield panel).
+        self._load_live()
         self._refresh_bestiary()
         self._render_list()

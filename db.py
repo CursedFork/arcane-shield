@@ -132,6 +132,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             state_json TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS live_encounter (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            state_json TEXT NOT NULL DEFAULT '{}'
+        );
         CREATE TABLE IF NOT EXISTS dm_shield_tabs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -574,6 +578,26 @@ class Database:
 
     def delete_saved_encounter(self, id: int) -> None:
         self.conn.execute("DELETE FROM saved_encounters WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Live encounter (shared by Initiative tab + DM Shield panel) ─────────────
+
+    def get_live_encounter(self) -> dict:
+        row = self.conn.execute(
+            "SELECT state_json FROM live_encounter WHERE id=1").fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0] or "{}")
+        except Exception:
+            return {}
+
+    def set_live_encounter(self, state: dict) -> None:
+        self.conn.execute(
+            "INSERT INTO live_encounter (id, state_json) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json",
+            (json.dumps(state),)
+        )
+        self.conn.commit()
 
     # ── DM Shield Tabs ─────────────────────────────────────────────────────────
 
