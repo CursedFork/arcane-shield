@@ -90,6 +90,21 @@ class BulkImportPage(ctk.CTkFrame):
                       command=self._export_templates
                       ).grid(row=2, column=2, padx=(8,24), pady=(0,24), sticky="ew")
 
+        # ── Danger zone ───────────────────────────────────────────────────────
+        danger = ctk.CTkFrame(zone, fg_color="transparent")
+        danger.grid(row=3, column=0, columnspan=3, sticky="ew", padx=24, pady=(0,18))
+        danger.columnconfigure(0, weight=1)
+        ctk.CTkFrame(danger, height=1, fg_color=BORDER).grid(row=0, column=0,
+                                                             columnspan=2, sticky="ew", pady=(0,10))
+        ctk.CTkLabel(danger, text="Danger zone — wipes every tab's data",
+                     text_color=MUTED, font=ctk.CTkFont(size=11), anchor="w"
+                     ).grid(row=1, column=0, sticky="w")
+        ctk.CTkButton(danger, text="🗑  Erase ALL Data", height=34, width=180,
+                      fg_color="transparent", hover_color=DANGER, text_color=DANGER,
+                      border_color=DANGER, border_width=2, font=ctk.CTkFont(size=13, weight="bold"),
+                      command=self._erase_all
+                      ).grid(row=1, column=1, sticky="e")
+
         self._status_lbl = ctk.CTkLabel(self, text="", text_color=MUTED,
                                          font=ctk.CTkFont(size=12))
         self._status_lbl.grid(row=1, column=0, sticky="se", padx=24, pady=4)
@@ -260,6 +275,42 @@ class BulkImportPage(ctk.CTkFrame):
                 f.write(cols.replace(", ", ",") + "\n")
         messagebox.showinfo("Templates Exported",
                             f"Blank template CSVs saved to:\n{folder}")
+
+    def _erase_all(self):
+        total = self.db.total_row_count()
+        if total == 0:
+            messagebox.showinfo("Erase All Data", "The database is already empty.")
+            return
+        # First confirmation — explicit about scope and irreversibility.
+        if not messagebox.askyesno(
+            "Erase ALL data?",
+            f"This permanently deletes EVERYTHING in the database — all "
+            f"{total} records across every tab:\n\n"
+            f"Bestiary, Spells, Magic Items, Mechanics, Campaigns, Notes, "
+            f"Character Options, Conditions, Skills, Setting Info, Shops, "
+            f"Party Loot, Roster, saved encounters, and DM Shield layouts.\n\n"
+            f"A safety backup is saved automatically, but this cannot be undone "
+            f"from inside the app.\n\nAre you absolutely sure?",
+            icon="warning",
+        ):
+            return
+        # Second confirmation — last chance.
+        if not messagebox.askyesno(
+            "Final confirmation",
+            "Last chance — erase the ENTIRE database now?",
+            icon="warning",
+        ):
+            return
+        removed = self.db.wipe_all_data()
+        for w in self._results_frame.winfo_children():
+            w.destroy()
+        self._results = []
+        self._status_lbl.configure(text=f"Database erased — {removed} records removed.")
+        messagebox.showinfo(
+            "Database cleared",
+            f"Removed {removed} records.\n\nStandard Conditions and Skills will be "
+            f"restored automatically the next time you launch the app.",
+        )
 
     def refresh(self):
         pass  # no auto-refresh needed

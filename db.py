@@ -1134,6 +1134,41 @@ class Database:
         self.conn.commit()
         return cur.rowcount
 
+    # Every table that holds user data (deepest-first so FK cascades are safe).
+    DATA_TABLES = [
+        "dm_shield_panels", "dm_shield_tabs", "saved_encounters", "live_encounter",
+        "players", "magic_items", "bestiary", "spells", "conditions", "skills",
+        "character_options", "settings_lore", "mechanics", "campaigns", "notes",
+        "shops", "party_items",
+    ]
+
+    def total_row_count(self) -> int:
+        """Total rows across all data tables (for the wipe confirmation)."""
+        total = 0
+        for t in self.DATA_TABLES:
+            try:
+                total += self.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except Exception:
+                pass
+        return total
+
+    def wipe_all_data(self) -> int:
+        """Delete EVERYTHING from the database. Snapshots a backup first.
+        Returns the number of rows that existed before the wipe."""
+        before = self.total_row_count()
+        _make_backup(self.conn)  # safety snapshot before a full wipe
+        for t in self.DATA_TABLES:
+            try:
+                self.conn.execute(f"DELETE FROM {t}")
+            except Exception:
+                pass
+        self.conn.commit()
+        try:
+            self.conn.execute("VACUUM")
+        except Exception:
+            pass
+        return before
+
     # ── CSV Export ─────────────────────────────────────────────────────────────
 
     def export_csv(self, table: str) -> str:
