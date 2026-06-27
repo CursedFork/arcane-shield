@@ -204,6 +204,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             description TEXT NOT NULL DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS languages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            category TEXT NOT NULL DEFAULT 'Standard',
+            script TEXT NOT NULL DEFAULT '',
+            typical_speakers TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS mechanics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -291,15 +300,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except Exception:
         pass
 
-    # Versioned re-classification: bump when the source rules change so existing
-    # DBs get re-labeled once. v1 = split unofficial-with-source into 'Third-Party'.
+    # Versioned one-time data migrations (PRAGMA user_version is the schema rev).
     try:
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        if ver < 1:
+        if ver < 1:  # split unofficial-with-source bestiary entries into 'Third-Party'
             for r in conn.execute("SELECT id, statblock_md FROM bestiary").fetchall():
                 conn.execute("UPDATE bestiary SET source=? WHERE id=?",
                              (classify_bestiary_source(r[1]), r[0]))
-            conn.execute("PRAGMA user_version = 1")
+        if ver < 2:  # fix "Feature: Feature:" double-prefix in background bodies
+            for r in conn.execute(
+                    "SELECT id, body_md FROM character_options WHERE category='background'").fetchall():
+                fixed = re.sub(r"(?i)feature:\s*feature:", "Feature:", r[1] or "")
+                if fixed != (r[1] or ""):
+                    conn.execute("UPDATE character_options SET body_md=? WHERE id=?", (fixed, r[0]))
+        conn.execute("PRAGMA user_version = 2")
     except Exception:
         pass
 
@@ -322,7 +336,59 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     (nm, ab, desc, i))
     except Exception:
         pass
+
+    # Seed the standard 5e languages once.
+    try:
+        if conn.execute("SELECT COUNT(*) FROM languages").fetchone()[0] == 0:
+            for i, (nm, cat, scr, spk, desc) in enumerate(_LANGUAGE_SEED):
+                conn.execute(
+                    "INSERT OR IGNORE INTO languages "
+                    "(name,category,script,typical_speakers,description,sort_order) "
+                    "VALUES (?,?,?,?,?,?)", (nm, cat, scr, spk, desc, i))
+    except Exception:
+        pass
     conn.commit()
+
+
+# Standard 5e languages (PHB). (name, category, script, typical_speakers, description)
+_LANGUAGE_SEED = [
+    ("Common", "Standard", "Common", "Humans, most civilized folk",
+     "The trade tongue of most of the multiverse; nearly everyone speaks it."),
+    ("Dwarvish", "Standard", "Dwarvish", "Dwarves",
+     "Full of hard consonants and guttural sounds; carries into runic writing."),
+    ("Elvish", "Standard", "Elvish", "Elves",
+     "Fluid, with subtle intonations and intricate grammar; a beautiful script."),
+    ("Giant", "Standard", "Dwarvish", "Giants, ogres",
+     "The language of giantkind, descended from the Ordning's ancient tongue."),
+    ("Gnomish", "Standard", "Dwarvish", "Gnomes",
+     "Known for its technical treatises and catalogs of knowledge."),
+    ("Goblin", "Standard", "Dwarvish", "Goblinoids (goblins, hobgoblins, bugbears)",
+     "A harsh tongue spoken across goblinoid warbands."),
+    ("Halfling", "Standard", "Common", "Halflings",
+     "Rarely written; halflings pass it along orally and keep few secrets in it."),
+    ("Orc", "Standard", "Dwarvish", "Orcs",
+     "A grating language with hard consonants, borrowing the Dwarvish script."),
+    ("Abyssal", "Exotic", "Infernal", "Demons, chaotic-evil outsiders",
+     "The chaotic, vile speech of the demons of the Abyss."),
+    ("Celestial", "Exotic", "Celestial", "Celestials (angels, devas)",
+     "The melodic language of the upper planes."),
+    ("Draconic", "Exotic", "Draconic", "Dragons, dragonborn, kobolds",
+     "Thought to be one of the oldest languages; used in much arcane writing."),
+    ("Deep Speech", "Exotic", "—", "Aberrations (mind flayers, beholders)",
+     "An alien tongue of aberrations; impossible for most to speak without practice."),
+    ("Infernal", "Exotic", "Infernal", "Devils, lawful-evil outsiders",
+     "The precise, contractual language of the Nine Hells."),
+    ("Primordial", "Exotic", "Dwarvish", "Elementals",
+     "The elemental tongue, with dialects Aquan, Auran, Ignan, and Terran."),
+    ("Sylvan", "Exotic", "Elvish", "Fey creatures",
+     "The language of the Feywild and its fey inhabitants."),
+    ("Undercommon", "Exotic", "Elvish", "Underdark traders (drow, etc.)",
+     "The trade language of the Underdark."),
+    ("Druidic", "Secret", "Druidic", "Druids only",
+     "The secret language of druids; outsiders cannot learn it. Can leave hidden messages."),
+    ("Thieves' Cant", "Secret", "—", "Rogues",
+     "A secret mix of dialect, jargon, and code that lets rogues hide messages in conversation."),
+]
 
 
 # Standard 5e conditions — concise, paraphrased mechanical summaries.
@@ -394,6 +460,15 @@ def _tags_in(row: dict) -> dict:
     if "tags" in row:
         row["tags"] = json.loads(row["tags"] or "[]")
     return row
+
+
+def _feat_has_prereq(body_md: str) -> bool:
+    """True if a feat's body lists a real prerequisite (not 'None')."""
+    m = re.search(r"(?i)prerequisite:\**\s*([^\n]*)", body_md or "")
+    if not m:
+        return False
+    val = m.group(1).strip().strip("*").strip()
+    return bool(val) and val.lower() not in ("none", "-", "—", "n/a")
 
 
 def _tag_list(tags) -> list[str]:
@@ -738,14 +813,30 @@ class Database:
 
     # ── Character Options (races / classes / subclasses / backgrounds / feats) ──
 
-    def list_char_options(self, category="", search="") -> list[dict]:
+    def list_char_options(self, category="", search="", source="",
+                          boon=None, prereq=None) -> list[dict]:
         q = "SELECT * FROM character_options WHERE 1=1"; p: list = []
         if category:
             q += " AND category=?"; p.append(category)
         if search:
             q += " AND (name LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        if source:
+            q += " AND LOWER(COALESCE(source,''))=?"; p.append(source.lower())
+        if boon is True:
+            q += " AND LOWER(name) LIKE '%boon%'"
+        elif boon is False:
+            q += " AND LOWER(name) NOT LIKE '%boon%'"
         q += " ORDER BY name"
-        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+        if prereq is not None:
+            rows = [r for r in rows if _feat_has_prereq(r.get("body_md", "")) == prereq]
+        return rows
+
+    def char_feat_sources(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT source FROM character_options "
+            "WHERE category='feat' AND source IS NOT NULL AND source!='' ORDER BY source"
+        ).fetchall()]
 
     def create_char_option(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
@@ -833,6 +924,47 @@ class Database:
 
     def delete_skill(self, id: int) -> None:
         self.conn.execute("DELETE FROM skills WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Languages ──────────────────────────────────────────────────────────────
+
+    def list_languages(self, search="", category="") -> list[dict]:
+        q = "SELECT * FROM languages WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (name LIKE ? OR typical_speakers LIKE ? OR description LIKE ?)"
+            p += [f"%{search}%", f"%{search}%", f"%{search}%"]
+        if category:
+            q += " AND category=?"; p.append(category)
+        q += " ORDER BY category, sort_order, name"
+        return _rows(self.conn.execute(q, p).fetchall())
+
+    def language_categories(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT category FROM languages WHERE category!='' ORDER BY category"
+        ).fetchall()]
+
+    def create_language(self, d: dict) -> int:
+        order = self.conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM languages").fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO languages (name,category,script,typical_speakers,description,sort_order) "
+            "VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET category=excluded.category, script=excluded.script, "
+            "typical_speakers=excluded.typical_speakers, description=excluded.description",
+            (d["name"], d.get("category", "Standard"), d.get("script", ""),
+             d.get("typical_speakers", ""), d.get("description", ""), d.get("sort_order", order))
+        )
+        self._autocommit()
+        return cur.lastrowid
+
+    def update_language(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE languages SET name=?,category=?,script=?,typical_speakers=?,description=? WHERE id=?",
+            (d["name"], d.get("category", "Standard"), d.get("script", ""),
+             d.get("typical_speakers", ""), d.get("description", ""), id)
+        )
+        self.conn.commit()
+
+    def delete_language(self, id: int) -> None:
+        self.conn.execute("DELETE FROM languages WHERE id=?", (id,)); self.conn.commit()
 
     # ── Campaigns ──────────────────────────────────────────────────────────────
 

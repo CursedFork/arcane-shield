@@ -16,6 +16,7 @@ from pages.items import ItemsPage
 from pages.bestiary import BestiaryPage
 from pages.spells import SpellsPage
 from pages.conditions import ConditionsPage
+from pages.languages import LanguagesPage
 from pages.character_options import CharacterOptionsPage
 from pages.skills import SkillsPage
 from pages.settings import SettingsPage
@@ -48,6 +49,7 @@ NAV_CONTENT = [
     ("char_opts",  "🧙  Character Options"),
     ("conditions", "🜸  Conditions"),
     ("skills",     "🎯  Skill Checks"),
+    ("languages",  "🗣  Languages"),
     ("mechanics",  "⚙  Mechanics"),
     ("campaigns",  "📖  Campaigns"),
     ("settings",   "🌍  Setting Info"),
@@ -163,6 +165,7 @@ class App(ctk.CTk):
             "char_opts":  CharacterOptionsPage(self._content, self.db),
             "conditions": ConditionsPage(self._content, self.db),
             "skills":     SkillsPage(self._content, self.db),
+            "languages":  LanguagesPage(self._content, self.db),
             "settings":   SettingsPage(self._content, self.db),
             "mechanics":  MechanicsPage(self._content, self.db),
             "campaigns":  CampaignsPage(self._content, self.db),

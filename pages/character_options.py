@@ -121,6 +121,27 @@ class _CategoryTab(ctk.CTkFrame):
                       hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=13),
                       command=self._reset_filters).grid(row=0, column=1, padx=(4,0))
 
+        # Feat-only filters: source (XPHB = newer rules), boon, prerequisite.
+        if self.category == "feat":
+            cb_kw = dict(fg_color=SURFACE2, border_color=BORDER, button_color=ACCENT,
+                         text_color=TEXT, dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                         height=26, font=ctk.CTkFont(size=11))
+            self._feat_source_var = tk.StringVar(value="All Sources")
+            self._feat_source_cb = ctk.CTkComboBox(srow, variable=self._feat_source_var,
+                                                   values=["All Sources"],
+                                                   command=lambda _: self._apply(), **cb_kw)
+            self._feat_source_cb.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
+            self._feat_boon_var = tk.StringVar(value="All feats")
+            ctk.CTkComboBox(srow, variable=self._feat_boon_var,
+                            values=["All feats", "Boons only", "Exclude boons"],
+                            command=lambda _: self._apply(), **cb_kw
+                            ).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
+            self._feat_prereq_var = tk.StringVar(value="Any prerequisite")
+            ctk.CTkComboBox(srow, variable=self._feat_prereq_var,
+                            values=["Any prerequisite", "Has prerequisite", "No prerequisite"],
+                            command=lambda _: self._apply(), **cb_kw
+                            ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4,0))
+
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
 
@@ -151,14 +172,27 @@ class _CategoryTab(ctk.CTkFrame):
 
     def _reset_filters(self):
         self._search_var.set("")
+        if self.category == "feat":
+            self._feat_source_var.set("All Sources")
+            self._feat_boon_var.set("All feats")
+            self._feat_prereq_var.set("Any prerequisite")
         self._apply()
 
     def refresh(self):
+        if self.category == "feat":
+            self._feat_source_cb.configure(values=["All Sources"] + self.db.char_feat_sources())
         self._apply()
 
     def _apply(self):
-        self._items = self.db.list_char_options(category=self.category,
-                                                search=self._search_var.get().strip())
+        kw = dict(category=self.category, search=self._search_var.get().strip())
+        if self.category == "feat":
+            src = self._feat_source_var.get()
+            kw["source"] = "" if src == "All Sources" else src
+            b = self._feat_boon_var.get()
+            kw["boon"] = True if b == "Boons only" else (False if b == "Exclude boons" else None)
+            pr = self._feat_prereq_var.get()
+            kw["prereq"] = True if pr == "Has prerequisite" else (False if pr == "No prerequisite" else None)
+        self._items = self.db.list_char_options(**kw)
         self._render_list()
 
     def _show_placeholder(self):
