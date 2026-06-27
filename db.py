@@ -655,12 +655,15 @@ class Database:
 
     # ── Mechanics ──────────────────────────────────────────────────────────────
 
-    def list_mechanics(self, search="", campaign="", tag="") -> list[dict]:
+    def list_mechanics(self, search="", campaign="", tag="", title_group="") -> list[dict]:
         q = "SELECT * FROM mechanics WHERE 1=1"; p: list = []
         if search:
             q += " AND (title LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
         if campaign:
             q += " AND campaign=?"; p.append(campaign)
+        if title_group:
+            # Titles follow a "Group: Specific" convention (e.g. "Tool: ...").
+            q += " AND title LIKE ?"; p.append(f"{title_group}:%")
         q += " ORDER BY title"
         rows = [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
         if tag:
@@ -671,6 +674,16 @@ class Database:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT campaign FROM mechanics WHERE campaign IS NOT NULL AND campaign!='' ORDER BY campaign"
         ).fetchall()]
+
+    def mechanic_title_groups(self) -> list[str]:
+        """Distinct title prefixes (the part before the first colon), e.g.
+        'Tool', 'Harvesting', 'Crafting' — for filtering by mechanic group."""
+        groups: set[str] = set()
+        for r in self.conn.execute("SELECT title FROM mechanics").fetchall():
+            t = r[0] or ""
+            if ":" in t:
+                groups.add(t.split(":", 1)[0].strip())
+        return sorted(groups, key=str.lower)
 
     def mechanic_tags(self, min_count: int = 2, limit: int = 40) -> list[str]:
         """Mechanic category tags for the filter dropdown — kept to a bounded,

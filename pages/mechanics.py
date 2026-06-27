@@ -82,10 +82,21 @@ class MechanicsPage(ctk.CTkFrame):
                                        command=lambda _: self._apply_filters())
         self._tag_cb.grid(row=1, column=1, sticky="ew", padx=(3,0))
 
+        # Filter by mechanic title-group (e.g. Tool, Harvesting, Crafting) —
+        # separate from the tag filter.
+        self._group_var = tk.StringVar(value="All Groups")
+        self._group_cb = ctk.CTkComboBox(flt, variable=self._group_var, values=["All Groups"],
+                                         fg_color=SURFACE2, border_color=BORDER,
+                                         button_color=ACCENT, text_color=TEXT,
+                                         dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                                         height=28, font=ctk.CTkFont(size=12),
+                                         command=lambda _: self._apply_filters())
+        self._group_cb.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
+
         ctk.CTkButton(flt, text="⟲ Reset filters", height=24, fg_color="transparent",
                       hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
                       command=self._reset_filters
-                      ).grid(row=2, column=0, columnspan=2, sticky="e", pady=(4,0))
+                      ).grid(row=3, column=0, columnspan=2, sticky="e", pady=(4,0))
 
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
@@ -129,6 +140,7 @@ class MechanicsPage(ctk.CTkFrame):
         self._search_var.set("")
         self._campaign_var.set("All Campaigns")
         self._tag_var.set("All Types")
+        self._group_var.set("All Groups")
         self._apply_filters()
 
     def refresh(self):
@@ -136,15 +148,18 @@ class MechanicsPage(ctk.CTkFrame):
         # then apply the current filters.
         self._campaign_cb.configure(values=["All Campaigns"] + self.db.mechanic_campaigns())
         self._tag_cb.configure(values=["All Types"] + self.db.mechanic_tags())
+        self._group_cb.configure(values=["All Groups"] + self.db.mechanic_title_groups())
         self._apply_filters()
 
     def _apply_filters(self):
         campaign = self._campaign_var.get()
         tag = self._tag_var.get()
+        group = self._group_var.get()
         self._items = self.db.list_mechanics(
             search=self._search_var.get().strip(),
             campaign="" if campaign == "All Campaigns" else campaign,
             tag="" if tag == "All Types" else tag,
+            title_group="" if group == "All Groups" else group,
         )
         self._render_list()
 
