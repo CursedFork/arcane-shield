@@ -142,6 +142,16 @@ class _CategoryTab(ctk.CTkFrame):
                             command=lambda _: self._apply(), **cb_kw
                             ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4,0))
 
+        # Subclass-only filter: by main class (the `parent` field).
+        if self.category == "subclass":
+            self._parent_var = tk.StringVar(value="All Classes")
+            self._parent_cb = ctk.CTkComboBox(
+                srow, variable=self._parent_var, values=["All Classes"],
+                fg_color=SURFACE2, border_color=BORDER, button_color=ACCENT,
+                text_color=TEXT, dropdown_fg_color=SURFACE2, dropdown_text_color=TEXT,
+                height=26, font=ctk.CTkFont(size=11), command=lambda _: self._apply())
+            self._parent_cb.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
+
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
 
@@ -176,11 +186,15 @@ class _CategoryTab(ctk.CTkFrame):
             self._feat_source_var.set("All Sources")
             self._feat_boon_var.set("All feats")
             self._feat_prereq_var.set("Any prerequisite")
+        if self.category == "subclass":
+            self._parent_var.set("All Classes")
         self._apply()
 
     def refresh(self):
         if self.category == "feat":
             self._feat_source_cb.configure(values=["All Sources"] + self.db.char_feat_sources())
+        if self.category == "subclass":
+            self._parent_cb.configure(values=["All Classes"] + self.db.char_option_parents("subclass"))
         self._apply()
 
     def _apply(self):
@@ -192,6 +206,9 @@ class _CategoryTab(ctk.CTkFrame):
             kw["boon"] = True if b == "Boons only" else (False if b == "Exclude boons" else None)
             pr = self._feat_prereq_var.get()
             kw["prereq"] = True if pr == "Has prerequisite" else (False if pr == "No prerequisite" else None)
+        if self.category == "subclass":
+            parent = self._parent_var.get()
+            kw["parent"] = "" if parent == "All Classes" else parent
         self._items = self.db.list_char_options(**kw)
         self._render_list()
 

@@ -827,7 +827,7 @@ class Database:
     # ── Character Options (races / classes / subclasses / backgrounds / feats) ──
 
     def list_char_options(self, category="", search="", source="",
-                          boon=None, prereq=None) -> list[dict]:
+                          boon=None, prereq=None, parent="") -> list[dict]:
         q = "SELECT * FROM character_options WHERE 1=1"; p: list = []
         if category:
             q += " AND category=?"; p.append(category)
@@ -835,6 +835,8 @@ class Database:
             q += " AND (name LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
         if source:
             q += " AND LOWER(COALESCE(source,''))=?"; p.append(source.lower())
+        if parent:
+            q += " AND parent=?"; p.append(parent)
         if boon is True:
             q += " AND LOWER(name) LIKE '%boon%'"
         elif boon is False:
@@ -844,6 +846,14 @@ class Database:
         if prereq is not None:
             rows = [r for r in rows if _feat_has_prereq(r.get("body_md", "")) == prereq]
         return rows
+
+    def char_option_parents(self, category: str) -> list[str]:
+        """Distinct parent values for a category (e.g. main classes of subclasses)."""
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT parent FROM character_options "
+            "WHERE category=? AND parent IS NOT NULL AND parent!='' ORDER BY parent",
+            (category,)
+        ).fetchall()]
 
     def char_feat_sources(self) -> list[str]:
         return [r[0] for r in self.conn.execute(
