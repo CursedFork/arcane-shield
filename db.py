@@ -122,6 +122,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
             source TEXT,
             tags TEXT NOT NULL DEFAULT '[]'
         );
+        CREATE TABLE IF NOT EXISTS settings_lore (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            body_md TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS skills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            ability TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS mechanics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -230,6 +243,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     (nm, desc, i))
     except Exception:
         pass
+
+    # Seed the 18 standard skills once.
+    try:
+        if conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0] == 0:
+            for i, (nm, ab, desc) in enumerate(_SKILL_SEED):
+                conn.execute(
+                    "INSERT OR IGNORE INTO skills (name,ability,description,sort_order) VALUES (?,?,?,?)",
+                    (nm, ab, desc, i))
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -268,6 +291,29 @@ _CONDITION_SEED = [
                 "- Automatically fails STR and DEX saves; attacks against it have advantage."),
     ("Unconscious", "- Incapacitated, can't move or speak, unaware; drops what it's holding and falls prone.\n"
                     "- Fails STR & DEX saves; attacks have advantage; hits within 5 ft. are **critical hits**."),
+]
+
+
+# The 18 standard skills: (name, governing ability, short usage summary).
+_SKILL_SEED = [
+    ("Acrobatics", "Dexterity", "Keep your balance on tricky terrain, tumble, or slip free of a grapple."),
+    ("Animal Handling", "Wisdom", "Calm or control an animal, read its intentions, or handle a mount in a crisis."),
+    ("Arcana", "Intelligence", "Recall lore about spells, magic items, eldritch symbols, and the planes."),
+    ("Athletics", "Strength", "Climb, jump, swim, grapple, shove, or muscle past physical obstacles."),
+    ("Deception", "Charisma", "Convincingly hide the truth in word or deed; mislead, bluff, or disguise intent."),
+    ("History", "Intelligence", "Recall lore about events, ancient kingdoms, wars, and legendary figures."),
+    ("Insight", "Wisdom", "Read a creature's true intentions — detect a lie or predict a next move."),
+    ("Intimidation", "Charisma", "Influence through overt threats, hostile actions, or sheer menace."),
+    ("Investigation", "Intelligence", "Deduce from clues, search for hidden details, infer how something works."),
+    ("Medicine", "Wisdom", "Stabilize a dying creature or diagnose an illness."),
+    ("Nature", "Intelligence", "Recall lore about terrain, plants, animals, weather, and natural cycles."),
+    ("Perception", "Wisdom", "Spot, hear, or otherwise notice the presence of something."),
+    ("Performance", "Charisma", "Delight an audience with music, dance, acting, or storytelling."),
+    ("Persuasion", "Charisma", "Influence with tact, social grace, and good faith."),
+    ("Religion", "Intelligence", "Recall lore about deities, rites, prayers, and holy symbols."),
+    ("Sleight of Hand", "Dexterity", "Pick pockets, plant an item, conceal an object, or perform legerdemain."),
+    ("Stealth", "Dexterity", "Hide, move silently, and slip past notice."),
+    ("Survival", "Wisdom", "Track, hunt, navigate the wilds, forecast weather, and avoid natural hazards."),
 ]
 
 
@@ -644,6 +690,65 @@ class Database:
         self.conn.commit()
         return cur.rowcount
 
+    # ── Setting Information (published settings lore) ───────────────────────────
+
+    def list_settings(self, search="") -> list[dict]:
+        q = "SELECT * FROM settings_lore WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (name LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        q += " ORDER BY name"
+        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+
+    def create_setting(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO settings_lore (name,body_md,tags) VALUES (?,?,?)",
+            (d["name"], d.get("body_md", ""), tags)
+        )
+        self._autocommit()
+        return cur.lastrowid
+
+    def update_setting(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE settings_lore SET name=?,body_md=?,tags=? WHERE id=?",
+            (d["name"], d.get("body_md", ""), tags, id)
+        )
+        self.conn.commit()
+
+    def delete_setting(self, id: int) -> None:
+        self.conn.execute("DELETE FROM settings_lore WHERE id=?", (id,)); self.conn.commit()
+
+    # ── Skill Checks (18 standard skills reference) ─────────────────────────────
+
+    def list_skills(self, search="") -> list[dict]:
+        q = "SELECT * FROM skills WHERE 1=1"; p: list = []
+        if search:
+            q += " AND (name LIKE ? OR ability LIKE ? OR description LIKE ?)"
+            p += [f"%{search}%", f"%{search}%", f"%{search}%"]
+        q += " ORDER BY sort_order, name"
+        return _rows(self.conn.execute(q, p).fetchall())
+
+    def create_skill(self, d: dict) -> int:
+        order = self.conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM skills").fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO skills (name,ability,description,sort_order) VALUES (?,?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET ability=excluded.ability, description=excluded.description",
+            (d["name"], d.get("ability", ""), d.get("description", ""), d.get("sort_order", order))
+        )
+        self._autocommit()
+        return cur.lastrowid
+
+    def update_skill(self, id: int, d: dict) -> None:
+        self.conn.execute(
+            "UPDATE skills SET name=?,ability=?,description=? WHERE id=?",
+            (d["name"], d.get("ability", ""), d.get("description", ""), id)
+        )
+        self.conn.commit()
+
+    def delete_skill(self, id: int) -> None:
+        self.conn.execute("DELETE FROM skills WHERE id=?", (id,)); self.conn.commit()
+
     # ── Campaigns ──────────────────────────────────────────────────────────────
 
     def list_campaigns(self, search="", tag="") -> list[dict]:
@@ -933,6 +1038,7 @@ class Database:
         "shops":        "Shops",
         "party_items":  "Party Loot",
         "players":      "Party Roster",
+        "settings_lore": "Setting Information",
     }
 
     def clear_table(self, table: str) -> int:
@@ -975,6 +1081,13 @@ class Database:
             for r in self.conn.execute(
                     "SELECT name,level,school,casting_time,range,components,duration,"
                     "concentration,ritual,classes,description,source,tags FROM spells").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
+        elif table == "settings_lore":
+            w.writerow(["name","body_md","tags"])
+            for r in self.conn.execute("SELECT name,body_md,tags FROM settings_lore").fetchall():
                 row = list(r)
                 row[-1] = ";".join(json.loads(row[-1] or "[]"))
                 w.writerow(row)
@@ -1085,6 +1198,13 @@ class Database:
                         "campaign": row.get("campaign"),
                         "tags": _tag_list(row.get("tags","")),
                     })
+                elif table == "settings_lore":
+                    if not row.get("name"): skipped += 1; continue
+                    self.create_setting({
+                        "name": row["name"],
+                        "body_md": row.get("body_md",""),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
                 elif table == "character_options":
                     if not row.get("name") or not row.get("category"): skipped += 1; continue
                     self.create_char_option({
@@ -1168,6 +1288,8 @@ def _detect_table(headers: set, filename: str) -> str | None:
     # Header-based detection (most reliable)
     if "category" in h and "name" in h and ("parent" in h or "body_md" in h):
         return "character_options"
+    if "name" in h and "body_md" in h:
+        return "settings_lore"
     if "player_name" in h and "character_name" in h:
         return "players"
     if "shop_name" in h and "item_name" in h:

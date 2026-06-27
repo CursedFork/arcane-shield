@@ -17,6 +17,8 @@ from pages.bestiary import BestiaryPage
 from pages.spells import SpellsPage
 from pages.conditions import ConditionsPage
 from pages.character_options import CharacterOptionsPage
+from pages.skills import SkillsPage
+from pages.settings import SettingsPage
 from pages.mechanics import MechanicsPage
 from pages.campaigns import CampaignsPage
 from pages.notes import NotesPage
@@ -45,8 +47,10 @@ NAV_CONTENT = [
     ("spells",     "✨  Spells"),
     ("char_opts",  "🧙  Character Options"),
     ("conditions", "🜸  Conditions"),
+    ("skills",     "🎯  Skill Checks"),
     ("mechanics",  "⚙  Mechanics"),
     ("campaigns",  "📖  Campaigns"),
+    ("settings",   "🌍  Setting Info"),
     ("notes",      "✎  Notes"),
     ("shops",      "⚖  Shops & Loot"),
     ("initiative", "⚔  Initiative"),
@@ -104,10 +108,10 @@ class App(ctk.CTk):
         self._nav_btns: dict[str, ctk.CTkButton] = {}
         self._nav_defaults: dict[str, dict] = {}
 
-        def make_nav_btn(key, label, *, fg="transparent", text=MUTED,
+        def make_nav_btn(parent, key, label, *, fg="transparent", text=MUTED,
                          border=0, border_color=BORDER, **pack_kw):
             btn = ctk.CTkButton(
-                sb, text=label, anchor="w",
+                parent, text=label, anchor="w",
                 fg_color=fg, hover_color=SURFACE2,
                 text_color=text, font=ctk.CTkFont(size=13),
                 corner_radius=0 if not border else 6, height=38,
@@ -121,26 +125,28 @@ class App(ctk.CTk):
 
         # ── Top: DM Shield (primary, emphasized) ─────────────────────────────
         for key, label in NAV_TOP:
-            make_nav_btn(key, label, text=TEXT, fill="x", padx=0, pady=0)
+            make_nav_btn(sb, key, label, text=TEXT, fill="x", padx=0, pady=0)
         ctk.CTkFrame(sb, height=1, fg_color=BORDER).pack(fill="x", padx=12, pady=(6, 6))
 
-        # ── Middle: content tabs ─────────────────────────────────────────────
-        for key, label in NAV_CONTENT:
-            make_nav_btn(key, label, fill="x", padx=0, pady=0)
-
-        # ── Bottom: DB label, then a clearly-set-apart Bulk Import ───────────
+        # ── Bottom: pinned (packed before the expanding middle claims the rest) ─
         from db import _db_path
         db_p = str(_db_path())
         ctk.CTkLabel(
             sb, text=f"DB: {os.path.basename(db_p)}",
             font=ctk.CTkFont(size=9), text_color=MUTED, wraplength=180
         ).pack(side="bottom", pady=8, padx=8)
-
         for key, label in NAV_BOTTOM:
-            make_nav_btn(key, label, text=ACCENT, border=2, border_color=ACCENT,
+            make_nav_btn(sb, key, label, text=ACCENT, border=2, border_color=ACCENT,
                          side="bottom", fill="x", padx=10, pady=(0, 6))
         ctk.CTkFrame(sb, height=1, fg_color=BORDER).pack(side="bottom", fill="x",
                                                          padx=12, pady=(6, 4))
+
+        # ── Middle: scrollable content tabs (fills the space between) ────────
+        content_scroll = ctk.CTkScrollableFrame(sb, fg_color="transparent",
+                                                scrollbar_button_color=ACCENT)
+        content_scroll.pack(fill="both", expand=True, padx=0, pady=0)
+        for key, label in NAV_CONTENT:
+            make_nav_btn(content_scroll, key, label, fill="x", padx=0, pady=0)
 
     # ── Content area ───────────────────────────────────────────────────────────
 
@@ -156,6 +162,8 @@ class App(ctk.CTk):
             "spells":     SpellsPage(self._content, self.db),
             "char_opts":  CharacterOptionsPage(self._content, self.db),
             "conditions": ConditionsPage(self._content, self.db),
+            "skills":     SkillsPage(self._content, self.db),
+            "settings":   SettingsPage(self._content, self.db),
             "mechanics":  MechanicsPage(self._content, self.db),
             "campaigns":  CampaignsPage(self._content, self.db),
             "notes":      NotesPage(self._content, self.db),
