@@ -302,12 +302,14 @@ class BestiaryPage(ctk.CTkFrame):
             self._show_placeholder()
 
     def _clear_all(self):
-        n = len(self._items)
+        # Count the whole table (not the filtered view) — Clear All wipes everything.
+        n = len(self.db.list_bestiary())
         if n == 0:
             messagebox.showinfo("Clear All", "No bestiary entries to clear.")
             return
         if messagebox.askyesno("Clear All Bestiary",
-                               f"Permanently delete all {n} entr(ies)? This cannot be undone."):
+                               f"Permanently delete ALL {n} bestiary entries (the entire table)? "
+                               f"This cannot be undone."):
             self.db.clear_table("bestiary")
             self._selected = None
             self.refresh()
