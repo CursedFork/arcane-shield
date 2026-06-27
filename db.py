@@ -597,9 +597,22 @@ class Database:
             "SELECT DISTINCT campaign FROM mechanics WHERE campaign IS NOT NULL AND campaign!='' ORDER BY campaign"
         ).fetchall()]
 
-    def mechanic_tags(self) -> list[str]:
-        """Mechanic categories drawn from tags (e.g. Combat, Resting, Travel)."""
-        return self._distinct_tags("mechanics")
+    def mechanic_tags(self, min_count: int = 2, limit: int = 40) -> list[str]:
+        """Mechanic category tags for the filter dropdown — kept to a bounded,
+        meaningful shortlist (the most common tags appearing on >= min_count
+        entries) so the list never bloats into hundreds of one-off tags."""
+        from collections import Counter
+        freq: Counter = Counter()
+        for r in self.conn.execute("SELECT tags FROM mechanics").fetchall():
+            try:
+                for t in json.loads(r[0] or "[]"):
+                    if t:
+                        freq[t] += 1
+            except Exception:
+                pass
+        common = [t for t, n in freq.items() if n >= min_count]
+        common.sort(key=lambda t: -freq[t])          # most-used first
+        return sorted(common[:limit], key=str.lower)  # then alphabetical for scanning
 
     def create_mechanic(self, d: dict) -> int:
         tags = json.dumps(_tag_list(d.get("tags", [])))
