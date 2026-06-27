@@ -113,6 +113,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             description TEXT NOT NULL DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS character_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            name TEXT NOT NULL,
+            parent TEXT NOT NULL DEFAULT '',
+            body_md TEXT NOT NULL DEFAULT '',
+            source TEXT,
+            tags TEXT NOT NULL DEFAULT '[]'
+        );
         CREATE TABLE IF NOT EXISTS mechanics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -596,6 +605,45 @@ class Database:
     def delete_condition(self, id: int) -> None:
         self.conn.execute("DELETE FROM conditions WHERE id=?", (id,)); self.conn.commit()
 
+    # ── Character Options (races / classes / subclasses / backgrounds / feats) ──
+
+    def list_char_options(self, category="", search="") -> list[dict]:
+        q = "SELECT * FROM character_options WHERE 1=1"; p: list = []
+        if category:
+            q += " AND category=?"; p.append(category)
+        if search:
+            q += " AND (name LIKE ? OR body_md LIKE ?)"; p += [f"%{search}%", f"%{search}%"]
+        q += " ORDER BY name"
+        return [_tags_in(r) for r in _rows(self.conn.execute(q, p).fetchall())]
+
+    def create_char_option(self, d: dict) -> int:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        cur = self.conn.execute(
+            "INSERT INTO character_options (category,name,parent,body_md,source,tags) "
+            "VALUES (?,?,?,?,?,?)",
+            (d["category"], d["name"], d.get("parent", ""), d.get("body_md", ""),
+             d.get("source") or None, tags)
+        )
+        self._autocommit()
+        return cur.lastrowid
+
+    def update_char_option(self, id: int, d: dict) -> None:
+        tags = json.dumps(_tag_list(d.get("tags", [])))
+        self.conn.execute(
+            "UPDATE character_options SET category=?,name=?,parent=?,body_md=?,source=?,tags=? WHERE id=?",
+            (d["category"], d["name"], d.get("parent", ""), d.get("body_md", ""),
+             d.get("source") or None, tags, id)
+        )
+        self.conn.commit()
+
+    def delete_char_option(self, id: int) -> None:
+        self.conn.execute("DELETE FROM character_options WHERE id=?", (id,)); self.conn.commit()
+
+    def clear_char_category(self, category: str) -> int:
+        cur = self.conn.execute("DELETE FROM character_options WHERE category=?", (category,))
+        self.conn.commit()
+        return cur.rowcount
+
     # ── Campaigns ──────────────────────────────────────────────────────────────
 
     def list_campaigns(self, search="", tag="") -> list[dict]:
@@ -931,6 +979,14 @@ class Database:
                 row[-1] = ";".join(json.loads(row[-1] or "[]"))
                 w.writerow(row)
 
+        elif table == "character_options":
+            w.writerow(["category","name","parent","body_md","source","tags"])
+            for r in self.conn.execute(
+                    "SELECT category,name,parent,body_md,source,tags FROM character_options").fetchall():
+                row = list(r)
+                row[-1] = ";".join(json.loads(row[-1] or "[]"))
+                w.writerow(row)
+
         elif table == "mechanics":
             w.writerow(["title","body_md","campaign","tags"])
             for r in self.conn.execute("SELECT title,body_md,campaign,tags FROM mechanics").fetchall():
@@ -1029,6 +1085,16 @@ class Database:
                         "campaign": row.get("campaign"),
                         "tags": _tag_list(row.get("tags","")),
                     })
+                elif table == "character_options":
+                    if not row.get("name") or not row.get("category"): skipped += 1; continue
+                    self.create_char_option({
+                        "category": row["category"].strip().lower(),
+                        "name": row["name"],
+                        "parent": row.get("parent",""),
+                        "body_md": row.get("body_md",""),
+                        "source": row.get("source"),
+                        "tags": _tag_list(row.get("tags","")),
+                    })
                 elif table == "spells":
                     if not row.get("name"): skipped += 1; continue
                     self.create_spell({
@@ -1100,6 +1166,8 @@ def _detect_table(headers: set, filename: str) -> str | None:
     h = {c.lower() for c in headers}
 
     # Header-based detection (most reliable)
+    if "category" in h and "name" in h and ("parent" in h or "body_md" in h):
+        return "character_options"
     if "player_name" in h and "character_name" in h:
         return "players"
     if "shop_name" in h and "item_name" in h:
