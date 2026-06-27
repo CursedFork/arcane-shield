@@ -17,25 +17,31 @@ DANGER   = "#c0392b"
 SUCCESS  = "#27ae60"
 
 TABLE_LABELS = {
-    "players":     "Players / Roster",
-    "magic_items": "Magic Items",
-    "bestiary":    "Bestiary",
-    "mechanics":   "Mechanics",
-    "campaigns":   "Campaigns",
-    "notes":       "Session Notes",
-    "shops":       "Shops",
-    "party_items": "Party Loot",
+    "players":           "Players / Roster",
+    "magic_items":       "Magic Items",
+    "bestiary":          "Bestiary",
+    "spells":            "Spells",
+    "character_options": "Character Options",
+    "settings_lore":     "Setting Information",
+    "mechanics":         "Mechanics",
+    "campaigns":         "Campaigns",
+    "notes":             "Session Notes",
+    "shops":             "Shops",
+    "party_items":       "Party Loot",
 }
 
 TABLE_COLUMNS = {
-    "players":     "player_name, character_name, ac, max_hp, initiative_mod, passive_perception, notes",
-    "magic_items": "name, item_type, rarity, requires_attunement, attunement_requirement, description, mechanical_effect, charges, source_campaign, tags",
-    "bestiary":    "name, ac, max_hp, initiative_mod, cr, statblock_md, tags",
-    "mechanics":   "title, body_md, campaign, tags",
-    "campaigns":   "title, body_md, tags",
-    "notes":       "session_label, note_date, body",
-    "shops":       "shop_name, item_name, price, quantity, notes",
-    "party_items": "item_name, owner, quantity, notes",
+    "players":           "player_name, character_name, ac, max_hp, initiative_mod, passive_perception, notes",
+    "magic_items":       "name, item_type, rarity, requires_attunement, attunement_requirement, description, mechanical_effect, charges, source_campaign, tags",
+    "bestiary":          "name, ac, max_hp, initiative_mod, cr, statblock_md, tags, source",
+    "spells":            "name, level, school, casting_time, range, components, duration, concentration, ritual, classes, description, source, tags",
+    "character_options": "category, name, parent, body_md, source, tags",
+    "settings_lore":     "name, body_md, tags",
+    "mechanics":         "title, body_md, campaign, tags",
+    "campaigns":         "title, body_md, tags",
+    "notes":             "session_label, note_date, body",
+    "shops":             "shop_name, item_name, price, quantity, notes",
+    "party_items":       "item_name, owner, quantity, notes",
 }
 
 
