@@ -272,12 +272,12 @@ class MechanicsPage(ctk.CTkFrame):
             self._show_placeholder()
 
     def _clear_all(self):
-        n = len(self._items)
+        n = len(self.db.list_mechanics())  # whole table, not the filtered view
         if n == 0:
             messagebox.showinfo("Clear All", "No mechanics to clear.")
             return
         if messagebox.askyesno("Clear All Mechanics",
-                               f"Permanently delete all {n} mechanic(s)? This cannot be undone."):
+                               f"Permanently delete ALL {n} mechanic(s) (the entire table)? This cannot be undone."):
             self.db.clear_table("mechanics")
             self.refresh()
             self._show_placeholder()

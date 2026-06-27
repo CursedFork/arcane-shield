@@ -265,11 +265,12 @@ class _CategoryTab(ctk.CTkFrame):
             self._show_placeholder()
 
     def _clear(self):
-        n = len(self._items)
+        # Count the whole category (not the search-filtered view).
+        n = len(self.db.list_char_options(category=self.category))
         if n == 0:
             messagebox.showinfo("Clear", f"No {self.label.lower()} to clear."); return
         if messagebox.askyesno(f"Clear {self.label}",
-                               f"Delete all {n} {self.label.lower()}? This cannot be undone."):
+                               f"Delete ALL {n} {self.label.lower()}? This cannot be undone."):
             self.db.clear_char_category(self.category)
             self.refresh()
             self._show_placeholder()

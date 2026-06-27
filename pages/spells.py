@@ -342,11 +342,11 @@ class SpellsPage(ctk.CTkFrame):
             self._show_placeholder()
 
     def _clear_all(self):
-        n = len(self._spells)
+        n = len(self.db.list_spells())  # whole table, not the filtered view
         if n == 0:
             messagebox.showinfo("Clear All", "No spells to clear."); return
         if messagebox.askyesno("Clear All Spells",
-                               f"Permanently delete all {n} spell(s)? This cannot be undone."):
+                               f"Permanently delete ALL {n} spell(s) (the entire table)? This cannot be undone."):
             self.db.clear_table("spells")
             self._selected = None
             self.refresh()

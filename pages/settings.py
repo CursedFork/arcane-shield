@@ -188,10 +188,10 @@ class SettingsPage(ctk.CTkFrame):
             self._show_placeholder()
 
     def _clear(self):
-        n = len(self._items)
+        n = len(self.db.list_settings())  # whole table, not the filtered view
         if n == 0:
             messagebox.showinfo("Clear", "Nothing to clear."); return
-        if messagebox.askyesno("Clear All", f"Delete all {n} setting entries?"):
+        if messagebox.askyesno("Clear All", f"Delete ALL {n} setting entries (the entire table)?"):
             self.db.clear_table("settings_lore")
             self.refresh()
             self._show_placeholder()
