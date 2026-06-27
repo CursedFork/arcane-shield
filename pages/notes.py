@@ -101,6 +101,11 @@ class NotesPage(ctk.CTkFrame):
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=28
                      ).grid(row=0, column=1, sticky="ew", padx=(3,0))
 
+        ctk.CTkButton(flt, text="⟲ Reset filters", height=24, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
+                      command=self._reset_filters
+                      ).grid(row=1, column=0, columnspan=2, sticky="e", pady=(4,0))
+
         # List
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=3, column=0, sticky="nsew", padx=4, pady=(0,4))
@@ -142,6 +147,11 @@ class NotesPage(ctk.CTkFrame):
                          ).pack(fill="x", padx=8, pady=(0,5))
                 bind_row(row, lambda n=note: self._select(n), SURFACE2, BORDER)
         self._list_frame.finalize()
+
+    def _reset_filters(self):
+        self._filter_session_var.set("All Sessions")
+        self._filter_date_var.set("")
+        self._apply_filters()
 
     def refresh(self):
         self._session_cb.configure(values=["All Sessions"] + self.db.note_sessions())

@@ -48,11 +48,17 @@ class ConditionsPage(ctk.CTkFrame):
                       hover_color=ACCENT_H, text_color=TEXT, font=ctk.CTkFont(size=12),
                       command=self._new).grid(row=0, column=1, sticky="e")
 
+        srow = ctk.CTkFrame(left, fg_color="transparent")
+        srow.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
+        srow.columnconfigure(0, weight=1)
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._debounce(self._apply_filters))
-        ctk.CTkEntry(left, textvariable=self._search_var, placeholder_text="Search…",
+        ctk.CTkEntry(srow, textvariable=self._search_var, placeholder_text="Search…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT, height=30
-                     ).grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
+                     ).grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(srow, text="⟲", width=30, height=30, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=13),
+                      command=self._reset_filters).grid(row=0, column=1, padx=(4,0))
 
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,12))
@@ -74,6 +80,10 @@ class ConditionsPage(ctk.CTkFrame):
                                                  padx=8, pady=6)
             bind_row(row, lambda cc=c: self._show_detail(cc), SURFACE, SURFACE2)
         self._list_frame.finalize()
+
+    def _reset_filters(self):
+        self._search_var.set("")
+        self._apply_filters()
 
     def refresh(self):
         self._apply_filters()

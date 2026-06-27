@@ -113,6 +113,11 @@ class ItemsPage(ctk.CTkFrame):
                                        command=lambda _: self._apply_filters())
         self._tag_cb.grid(row=2, column=1, sticky="ew", padx=(3,0), pady=(4,0))
 
+        ctk.CTkButton(flt, text="⟲ Reset filters", height=24, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
+                      command=self._reset_filters
+                      ).grid(row=3, column=0, columnspan=2, sticky="e", pady=(4,0))
+
         # Item list
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
@@ -172,6 +177,14 @@ class ItemsPage(ctk.CTkFrame):
         )
         self._items = items
         self._render_list(items)
+
+    def _reset_filters(self):
+        self._search_var.set("")
+        self._type_var.set("All Types")
+        self._rarity_var.set("All Rarities")
+        self._attune_var.set("Any Attunement")
+        self._tag_var.set("All Tags")
+        self._apply_filters()
 
     def refresh(self):
         types = self.db.item_types()

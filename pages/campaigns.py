@@ -71,6 +71,11 @@ class CampaignsPage(ctk.CTkFrame):
                                        command=lambda _: self._apply_filters())
         self._tag_cb.grid(row=1, column=0, sticky="ew")
 
+        ctk.CTkButton(flt, text="⟲ Reset filters", height=24, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
+                      command=self._reset_filters
+                      ).grid(row=2, column=0, sticky="e", pady=(4,0))
+
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
 
@@ -103,6 +108,11 @@ class CampaignsPage(ctk.CTkFrame):
                      bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=240
                      ).pack(fill="x", padx=8, pady=8)
         self._list_frame.finalize()
+
+    def _reset_filters(self):
+        self._search_var.set("")
+        self._tag_var.set("All Tags")
+        self._apply_filters()
 
     def refresh(self):
         self._tag_cb.configure(values=["All Tags"] + self.db.campaign_tags())

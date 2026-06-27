@@ -145,6 +145,9 @@ class _ShopsTab(ctk.CTkFrame):
         ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search item…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
                      height=28, width=240).pack(side="left")
+        ctk.CTkButton(flt, text="⟲ Reset filters", height=28, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
+                      command=self._reset_filters).pack(side="left", padx=(8,0))
 
         # Table header
         header = ctk.CTkFrame(self, fg_color=SURFACE2, height=30, corner_radius=4)
@@ -204,6 +207,11 @@ class _ShopsTab(ctk.CTkFrame):
                               hover_color=DANGER, text_color=MUTED, font=ctk.CTkFont(size=11),
                               command=lambda it=it: self._delete(it)
                               ).grid(row=0, column=4, padx=(0,8))
+
+    def _reset_filters(self):
+        self._filter_shop_var.set("All Shops")
+        self._search_var.set("")
+        self.refresh()
 
     def refresh(self):
         self._shop_filter_cb.configure(values=["All Shops"] + self.db.shop_names())
@@ -296,6 +304,9 @@ class _LootTab(ctk.CTkFrame):
         ctk.CTkEntry(flt, textvariable=self._search_var, placeholder_text="Search item…",
                      fg_color=SURFACE2, border_color=BORDER, text_color=TEXT,
                      height=28, width=240).pack(side="left")
+        ctk.CTkButton(flt, text="⟲ Reset filters", height=28, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
+                      command=self._reset_filters).pack(side="left", padx=(8,0))
 
         self._rows_frame = ctk.CTkScrollableFrame(self, fg_color="transparent",
                                                    scrollbar_button_color=ACCENT)
@@ -331,6 +342,11 @@ class _LootTab(ctk.CTkFrame):
                               hover_color=DANGER, text_color=MUTED, font=ctk.CTkFont(size=11),
                               command=lambda it=it: self._delete(it)
                               ).grid(row=0, column=2, padx=(0,8))
+
+    def _reset_filters(self):
+        self._filter_owner_var.set("All Owners")
+        self._search_var.set("")
+        self.refresh()
 
     def refresh(self):
         self._owner_filter_cb.configure(values=["All Owners"] + self.db.party_owners())

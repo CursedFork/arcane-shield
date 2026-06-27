@@ -91,6 +91,11 @@ class BestiaryPage(ctk.CTkFrame):
                                           command=lambda _: self._apply_filters())
         self._source_cb.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
 
+        ctk.CTkButton(flt, text="⟲ Reset filters", height=24, fg_color="transparent",
+                      hover_color=SURFACE2, text_color=MUTED, font=ctk.CTkFont(size=11),
+                      command=self._reset_filters
+                      ).grid(row=3, column=0, columnspan=2, sticky="e", pady=(4,0))
+
         self._list_frame = ScrollList(left, bg=SURFACE, accent=ACCENT)
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0,4))
 
@@ -143,6 +148,13 @@ class BestiaryPage(ctk.CTkFrame):
         )
         self._entries = entries
         self._render_list(entries)
+
+    def _reset_filters(self):
+        self._search_var.set("")
+        self._cr_var.set("All CR")
+        self._type_var.set("All Types")
+        self._source_var.set("All Sources")
+        self._apply_filters()
 
     def refresh(self):
         crs = self.db.bestiary_crs()
