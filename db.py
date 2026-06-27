@@ -47,8 +47,77 @@ def _db_path() -> Path:
     return data_dir / "arcane-shield.db"
 
 
+def _backup_dir() -> Path:
+    d = _db_path().parent / "backups"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _is_healthy(path: Path) -> bool:
+    """True if the SQLite file opens and passes a quick integrity check."""
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        c = sqlite3.connect(path)
+        try:
+            ok = c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        finally:
+            c.close()
+        return ok
+    except Exception:
+        return False
+
+
+def _make_backup(conn: sqlite3.Connection, keep: int = 7) -> None:
+    """Write a consistent snapshot to backups/ (uses the SQLite backup API so
+    WAL contents are included), then prune to the most recent `keep`."""
+    import time
+    try:
+        dst = _backup_dir() / f"arcane-shield_{time.strftime('%Y%m%d_%H%M%S')}.db"
+        bck = sqlite3.connect(dst)
+        with bck:
+            conn.backup(bck)
+        bck.close()
+        backups = sorted(_backup_dir().glob("arcane-shield_*.db"))
+        for old in backups[:-keep]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _auto_recover(path: Path) -> bool:
+    """If the live DB is corrupt, move it aside and restore the newest healthy
+    backup. Returns True if a restore happened."""
+    if _is_healthy(path):
+        return False
+    # Newest-first list of restore candidates: rotating backups, then any
+    # legacy .backup_* snapshots next to the DB.
+    candidates = sorted(_backup_dir().glob("arcane-shield_*.db"), reverse=True)
+    candidates += sorted(path.parent.glob("arcane-shield.db.backup_*"), reverse=True)
+    good = next((b for b in candidates if _is_healthy(b)), None)
+    if good is None:
+        return False
+    import time, shutil
+    quarantine = path.parent / f"corrupt_{time.strftime('%Y%m%d_%H%M%S')}"
+    quarantine.mkdir(exist_ok=True)
+    for ext in ("", "-wal", "-shm"):
+        f = Path(str(path) + ext)
+        if f.exists():
+            try:
+                shutil.move(str(f), str(quarantine / f.name))
+            except Exception:
+                pass
+    shutil.copy2(good, path)
+    return True
+
+
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path(), check_same_thread=False)
+    path = _db_path()
+    _auto_recover(path)  # repair a corrupt DB from the latest good backup first
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -340,6 +409,9 @@ class Database:
         self.conn = _connect()
         _migrate(self.conn)
         self._bulk = False  # when True, create_* defer committing (see import_csv)
+        # Snapshot a healthy DB on every clean launch so auto-recovery always
+        # has a recent good copy to fall back on.
+        _make_backup(self.conn)
 
     def _autocommit(self):
         """Commit unless a bulk operation is batching writes into one transaction."""
